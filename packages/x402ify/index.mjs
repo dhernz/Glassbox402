@@ -32,6 +32,9 @@ Options:
   --port <n>          local port                                                 [4030]
   --sample <path>     a valid GET path on the API (used by dashboards)           [/]
   --hub <url>         stream payments into a GlassBox402 dashboard             [none]
+  --header "K: V"     upstream auth header, repeatable (e.g. "Api-Key: …")
+  --method <m>        how the test-buyer calls it: GET or POST                  [GET]
+  --body <json>       request body for the test-buyer (e.g. a GraphQL query)
   --facilitator <url> override the facilitator URL
   --network <id>      override the network id (e.g. hedera:testnet, eip155:8453)
 `);
@@ -84,6 +87,14 @@ const facilitator = flag("facilitator", chain.facilitator);
 const network = flag("network", chain.network);
 const hub = flag("hub", process.env.GLASSBOX_HUB);
 
+// --header "Name: Value" (repeatable) → upstream auth headers (e.g. Tally's Api-Key).
+const flagAll = (n) => argv.reduce((acc, a, i) => (a === `--${n}` && argv[i + 1] ? [...acc, argv[i + 1]] : acc), []);
+const customHeaders = {};
+for (const h of flagAll("header")) { const i = h.indexOf(":"); if (i > 0) customHeaders[h.slice(0, i).trim()] = h.slice(i + 1).trim(); }
+// how the test-buyer should call this API (GET, or POST a GraphQL/JSON body).
+const sampleMethod = (flag("method", "GET")).toUpperCase();
+const sampleBody = flag("body");
+
 async function emit(type, data = {}, reqId) {
   if (!hub) return;
   try {
@@ -101,10 +112,10 @@ catch { console.error(`chain "${chainName}" needs an extra package — install i
 const x402Server = new x402ResourceServer(new HTTPFacilitatorClient({ url: facilitator })).register(chain.register, new Scheme());
 const price = chain.price(amount);
 const accepts = { scheme: "exact", network, payTo, price, maxTimeoutSeconds: 180 };
-const routes = {
-  [`GET ${sample.split("?")[0]}`]: { description: `${lane} via x402ify`, accepts },
-  "GET /*": { description: `${lane} via x402ify`, accepts },
-};
+const mk = () => ({ description: `${lane} via x402ify`, accepts });
+const sp = sample.split("?")[0];
+// gate GET and POST so REST and GraphQL APIs are both paywalled.
+const routes = { [`GET ${sp}`]: mk(), "GET /*": mk(), [`POST ${sp}`]: mk(), "POST /*": mk() };
 
 const app = new Hono();
 
@@ -131,13 +142,19 @@ app.use("*", paymentMiddleware(routes, x402Server));
 app.all("*", async (c) => {
   const base = new URL(upstream);
   const url = base.pathname !== "/" ? base : new URL(c.req.path + (c.req.url.includes("?") ? "?" + c.req.url.split("?")[1] : ""), upstream);
-  const up = await fetch(url, { method: c.req.method, headers: { accept: "application/json" } });
+  const headers = { accept: "application/json", ...customHeaders };
+  let reqBody;
+  if (c.req.method !== "GET" && c.req.method !== "HEAD") {
+    reqBody = await c.req.text();
+    headers["content-type"] = c.req.header("content-type") ?? "application/json";
+  }
+  const up = await fetch(url, { method: c.req.method, headers, body: reqBody });
   const body = await up.text();
   return new Response(body, { status: up.status, headers: { "content-type": up.headers.get("content-type") ?? "application/json" } });
 });
 
 serve({ fetch: app.fetch, port }, () => {
-  emit("lane_up", { upstream, price: amount, payTo, owner: payTo, port, sample, chain: chainName });
+  emit("lane_up", { upstream, price: amount, payTo, owner: payTo, port, sample, chain: chainName, sampleMethod, sampleBody });
   console.log(`💰 ${lane} is now x402 [${chainName}]:  http://localhost:${port}  →  ${upstream}   (${amount} → ${payTo})`);
   if (!hub) console.log(`   tip: add --hub http://localhost:4021 to stream payments into a GlassBox402 dashboard`);
 });

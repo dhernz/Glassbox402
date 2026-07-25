@@ -109,12 +109,17 @@ const server = createServer(async (req, res) => {
       return json(res, 200, analytics.snapshot());
     }
     if (req.method === "POST" && url.pathname === "/testbuyer") {
-      const { url: target, verified } = await readBody(req);
+      const { url: target, verified, method, body: sendBody } = await readBody(req);
       try {
         const { getPaidFetch } = await import("./paid-fetch.js");
-        const init = verified ? { headers: { "x-world-proof": "demo-verified" } } : undefined;
-        const r = await getPaidFetch()(target, init as any);
-        const body = (await r.text()).slice(0, 2000); // the real API response the buyer received
+        const init: any = { headers: {} };
+        if (verified) init.headers["x-world-proof"] = "demo-verified";
+        if (method && method !== "GET") {
+          init.method = method;
+          if (sendBody != null) { init.body = typeof sendBody === "string" ? sendBody : JSON.stringify(sendBody); init.headers["content-type"] = "application/json"; }
+        }
+        const r = await getPaidFetch()(target, init);
+        const body = (await r.text()).slice(0, 20000); // the real API response the buyer received
         let txHash: string | undefined, hashscan: string | undefined;
         const ph = r.headers.get("payment-response");
         if (ph) {

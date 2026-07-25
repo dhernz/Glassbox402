@@ -28,6 +28,14 @@ const lane = flag("name", new URL(upstream).hostname.replace(/^api\./, "").split
 const port = Number(flag("port", "4030"));
 const sample = flag("sample", "/")!;
 const FACILITATOR = process.env.FACILITATOR_URL ?? "https://api.testnet.blocky402.com";
+
+// --header "Name: Value" (repeatable) → upstream auth headers, e.g. Tally's `Api-Key`.
+const flagAll = (n: string) => argv.reduce<string[]>((acc, a, i) => (a === `--${n}` && argv[i + 1] ? [...acc, argv[i + 1]] : acc), []);
+const customHeaders: Record<string, string> = {};
+for (const h of flagAll("header")) { const i = h.indexOf(":"); if (i > 0) customHeaders[h.slice(0, i).trim()] = h.slice(i + 1).trim(); }
+// how the test-buyer should call this API (GET, or POST a GraphQL query) — advertised to the dashboard.
+const sampleMethod = (flag("method", "GET") as string).toUpperCase();
+const sampleBody = flag("body");
 const toAtomic = (hbar: number) => String(Math.round(hbar * 1e8)); // HBAR → tinybar
 
 // live feature policy (World human-verified tiering), refreshed from the hub.
@@ -48,15 +56,17 @@ const priceForCtx = (ctx: any) => {
   return { amount: toAtomic(hbar), asset: "0.0.0" };
 };
 
+const mkRoute = () => ({
+  description: `${lane} via GlassBox402`,
+  accepts: { scheme: "exact", network: "hedera:testnet", payTo, price: priceForCtx, maxTimeoutSeconds: 180 },
+});
+const samplePath = sample.split("?")[0];
+// gate both GET and POST so REST *and* GraphQL APIs are paywalled.
 const routes: any = {
-  [`GET ${sample.split("?")[0]}`]: {
-    description: `${lane} via GlassBox402`,
-    accepts: { scheme: "exact", network: "hedera:testnet", payTo, price: priceForCtx, maxTimeoutSeconds: 180 },
-  },
-  "GET /*": {
-    description: `${lane} via GlassBox402`,
-    accepts: { scheme: "exact", network: "hedera:testnet", payTo, price: priceForCtx, maxTimeoutSeconds: 180 },
-  },
+  [`GET ${samplePath}`]: mkRoute(),
+  "GET /*": mkRoute(),
+  [`POST ${samplePath}`]: mkRoute(),
+  "POST /*": mkRoute(),
 };
 
 const app = new Hono();
@@ -98,14 +108,23 @@ app.use("*", paymentMiddleware(routes, x402Server));
 app.all("*", async (c) => {
   const upstreamBase = new URL(upstream);
   const url = upstreamBase.pathname !== "/" ? upstreamBase : new URL(c.req.path + (c.req.url.includes("?") ? "?" + c.req.url.split("?")[1] : ""), upstream);
-  const headers: Record<string, string> = { accept: "application/json" };
-  if (process.env.GRAPH_API_KEY) headers.authorization = `Bearer ${process.env.GRAPH_API_KEY}`;
-  const up = await fetch(url, { method: c.req.method, headers });
+  const headers: Record<string, string> = { accept: "application/json", ...customHeaders };
+  // Graph subgraph auth only for Graph upstreams — never leak a Bearer to other APIs (e.g. Tally).
+  if (process.env.GRAPH_API_KEY && upstream.includes("thegraph.com") && !customHeaders.authorization && !customHeaders.Authorization) {
+    headers.authorization = `Bearer ${process.env.GRAPH_API_KEY}`;
+  }
+  // forward the request body + content-type for non-GET (e.g. GraphQL POST queries)
+  let reqBody: string | undefined;
+  if (c.req.method !== "GET" && c.req.method !== "HEAD") {
+    reqBody = await c.req.text();
+    headers["content-type"] = c.req.header("content-type") ?? "application/json";
+  }
+  const up = await fetch(url, { method: c.req.method, headers, body: reqBody });
   const body = await up.text();
   return new Response(body, { status: up.status, headers: { "content-type": up.headers.get("content-type") ?? "application/json" } });
 });
 
 serve({ fetch: app.fetch, port }, async () => {
-  await emit(gbe("lane_up", lane, crypto.randomUUID(), { upstream, price: priceHbar, payTo, owner: payTo, port, sample }));
+  await emit(gbe("lane_up", lane, crypto.randomUUID(), { upstream, price: priceHbar, payTo, owner: payTo, port, sample, sampleMethod, sampleBody }));
   console.log(`💰 ${lane} is x402 (real, blocky402→Hedera):  http://localhost:${port}  →  ${upstream}   (${priceHbar} HBAR/call → ${payTo})`);
 });
