@@ -6,9 +6,31 @@ export const HUB = "http://localhost:4021";
 export const HUB_WS = "ws://localhost:4021";
 export const MIRROR = "https://testnet.mirrornode.hedera.com/api/v1";
 
-// Demo seller = Hedera account 0.0.9742887. Payments settle here, so the balance
-// grows on-chain (mirror node resolves it by account id, not by evm alias).
-export const DEFAULT_WALLET = "0.0.9742887";
+// Demo seller = Hedera account 0.0.9742887 (EVM address 0xcca7…dd55). Payments
+// settle here and the balance grows on-chain. The connected-wallet identity is
+// the EVM address (shown in the UI and the `--wallet` convert command); the
+// mirror-node balance is fetched by account id, since this account has no EVM
+// alias registered and its 0x form doesn't resolve on the mirror node.
+export const DEFAULT_WALLET = "0xcca76e7c0b8b19351a83701517c5c2d18b83dd55";
+export const DEFAULT_ACCOUNT_ID = "0.0.9742887";
+
+// wallet (lowercased) → Hedera account id for the balance lookup.
+const BALANCE_ACCOUNT: Record<string, string> = {
+  [DEFAULT_WALLET]: DEFAULT_ACCOUNT_ID,
+};
+export function balanceAccountFor(wallet: string): string {
+  return BALANCE_ACCOUNT[wallet.toLowerCase()] ?? wallet;
+}
+
+// Different components of the stack may label the seller by EVM address or by
+// account id. Treat them as the same operator so payment scoping matches either.
+const ALIASES: Record<string, string[]> = {
+  [DEFAULT_WALLET]: [DEFAULT_WALLET, DEFAULT_ACCOUNT_ID],
+  [DEFAULT_ACCOUNT_ID]: [DEFAULT_WALLET, DEFAULT_ACCOUNT_ID],
+};
+export function walletAliases(wallet: string): string[] {
+  return ALIASES[wallet.toLowerCase()] ?? ALIASES[wallet] ?? [wallet];
+}
 
 export interface GBEvent {
   id: string;
@@ -68,6 +90,28 @@ export interface Analytics {
   byHour: number[];
   byCountry: { code: string; name: string; flag: string; value: number }[];
   byPayer: { payer: string; spend: number; calls: number }[];
+}
+
+// Connect the judge's real MetaMask wallet. Returns the EVM address (which is
+// also the Hedera account: settling HBAR to it lazy-creates the account, so the
+// balance then resolves on the mirror node by this same 0x address).
+export const HEDERA_TESTNET_PARAMS = {
+  chainId: "0x128", // 296
+  chainName: "Hedera Testnet",
+  nativeCurrency: { name: "HBAR", symbol: "HBAR", decimals: 18 },
+  rpcUrls: ["https://testnet.hashio.io/api"],
+  blockExplorerUrls: ["https://hashscan.io/testnet"],
+};
+export async function connectMetaMask(): Promise<string | null> {
+  const eth = (window as any).ethereum;
+  if (!eth) throw new Error("no-metamask");
+  const accounts: string[] = await eth.request({ method: "eth_requestAccounts" });
+  const addr = accounts?.[0];
+  if (!addr) return null;
+  try {
+    await eth.request({ method: "wallet_addEthereumChain", params: [HEDERA_TESTNET_PARAMS] });
+  } catch { /* user can decline the network add; identity still works */ }
+  return addr;
 }
 
 async function jget<T>(path: string): Promise<T> {

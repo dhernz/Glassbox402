@@ -113,8 +113,8 @@ const server = createServer(async (req, res) => {
   await emit(gbe("settled", lane, reqId, { from, amount: effPrice, txHash: settle.txHash, payTo, path, tier, verified, ua: String(req.headers["user-agent"] ?? "") }));
 
   if (HEDERA_LIVE) {
-    // real HBAR moves to the seller account → the operator watches their balance grow
-    hederaSettle(effPrice)
+    // real HBAR moves to the connected wallet (payTo) → its balance grows on-chain
+    hederaSettle(payTo, effPrice)
       .then((r) => r && emit(gbe("hedera_receipt", lane, reqId, { hashscan: r.hashscan, txId: r.txId })))
       .catch((e) => console.error("hedera settle failed:", String(e)));
   }

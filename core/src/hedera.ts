@@ -64,25 +64,28 @@ export async function hederaReceipt(memo: string): Promise<HederaReceipt> {
   return { txId, topicId: topic, hashscan: hashscanTx(txId) };
 }
 
-// Optional: an actual HBAR transfer (needs a real recipient account id).
-export async function hederaTransfer(toAccountId: string, hbar = 0.001): Promise<HederaReceipt> {
+// Real HBAR transfer to any recipient — an account id (0.0.x) OR a raw EVM
+// address (0x…). Sending to a fresh EVM address lazy-creates the account, so a
+// judge's freshly-connected MetaMask wallet just starts receiving HBAR.
+export async function hederaTransfer(to: string, hbar = 0.001): Promise<HederaReceipt> {
   const c = initHedera();
   const from = AccountId.fromString(process.env.HEDERA_ACCOUNT_ID!);
+  const toAccount = to.startsWith("0x") ? AccountId.fromEvmAddress(0, 0, to) : AccountId.fromString(to);
   const tx = await new TransferTransaction()
     .addHbarTransfer(from, new Hbar(-hbar))
-    .addHbarTransfer(AccountId.fromString(toAccountId), new Hbar(hbar))
+    .addHbarTransfer(toAccount, new Hbar(hbar))
     .execute(c);
   await tx.getReceipt(c);
   const txId = tx.transactionId!.toString();
   return { txId, topicId: "", hashscan: hashscanTx(txId) };
 }
 
-// Settlement the operator can WATCH: real HBAR moves from the payer (operator)
-// to the seller account, so the connected wallet's balance grows on-chain.
-// hbar amount is scaled from the USD price so growth is visible in the demo.
-export async function hederaSettle(usdAmount: number): Promise<HederaReceipt | null> {
-  const seller = process.env.HEDERA_SELLER_ACCOUNT;
+// Settlement the operator can WATCH: real HBAR moves to the seller (the connected
+// wallet), so their balance grows on-chain. hbar is scaled from the USD price so
+// the growth is visible in the demo.
+export async function hederaSettle(toAddr: string, usdAmount: number): Promise<HederaReceipt | null> {
+  const seller = toAddr || process.env.HEDERA_SELLER_ACCOUNT;
   if (!seller) return null;
-  const hbar = Math.max(0.02, usdAmount * 5); // demo scaling: $0.01 → 0.05ℏ, $0.10 → 0.5ℏ
+  const hbar = Math.max(0.02, usdAmount * 5); // $0.01 → 0.05ℏ, $0.10 → 0.5ℏ
   return hederaTransfer(seller, hbar);
 }

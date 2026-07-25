@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  api, sendTestBuyer, fetchHbarBalance, sameAddr, shortAddr, avatarGradient,
-  usd, ago, DEFAULT_WALLET,
+  api, sendTestBuyer, fetchHbarBalance, balanceAccountFor, walletAliases,
+  shortAddr, avatarGradient, usd, ago, connectMetaMask,
   type GBEvent, type Lane, type Payment, type Policy, type Analytics, type Tier,
 } from "./hub";
 import { HUB_WS } from "./hub";
@@ -44,7 +44,24 @@ export default function App() {
    CONNECT WALLET — the login gate
    ============================================================ */
 function ConnectGate({ onConnect }: { onConnect: (a: string) => void }) {
-  const [addr, setAddr] = useState(DEFAULT_WALLET);
+  const [addr, setAddr] = useState("");
+  const [showPaste, setShowPaste] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [connecting, setConnecting] = useState(false);
+
+  async function metamask() {
+    setErr(null); setConnecting(true);
+    try {
+      const a = await connectMetaMask();
+      if (a) onConnect(a);
+    } catch (e) {
+      setErr((e as Error).message === "no-metamask"
+        ? "MetaMask not found — install it, or paste an address below."
+        : "Connection cancelled.");
+      setShowPaste(true);
+    } finally { setConnecting(false); }
+  }
+
   return (
     <div className="gate">
       <div className="gate-inner view-fade">
@@ -52,29 +69,29 @@ function ConnectGate({ onConnect }: { onConnect: (a: string) => void }) {
         <div>
           <div className="gate-title">GlassBox<b>402</b></div>
           <div className="gate-sub" style={{ margin: "10px auto 0" }}>
-            The glass storefront for your x402 API. Connect a wallet to watch it earn.
+            The glass storefront for your x402 API. Connect your wallet to watch it earn on Hedera.
           </div>
         </div>
         <div className="gate-card">
-          <div className="field" style={{ marginBottom: 4 }}>
-            <span className="label">Payout wallet address</span>
-            <input
-              className="input mono"
-              value={addr}
-              spellCheck={false}
-              onChange={(e) => setAddr(e.target.value)}
-              placeholder="0x…"
-              onKeyDown={(e) => e.key === "Enter" && onConnect(addr)}
-            />
-            <span className="helper">Your APIs and income are scoped to this address. Use the default demo wallet or paste your own.</span>
-          </div>
-          <button className="btn btn-primary btn-lg" style={{ justifyContent: "center" }} onClick={() => onConnect(addr)}>
-            <IconWallet /> Connect Wallet
+          <button className="btn btn-primary btn-lg" style={{ justifyContent: "center" }} disabled={connecting} onClick={metamask}>
+            <IconWallet /> {connecting ? "Connecting…" : "Connect MetaMask"}
           </button>
+          {err && <div className="helper" style={{ color: "var(--error-ink)" }}>{err}</div>}
+          {!showPaste
+            ? <button className="btn btn-ghost btn-sm" style={{ justifyContent: "center" }} onClick={() => setShowPaste(true)}>or paste an address</button>
+            : (
+              <div className="field" style={{ marginBottom: 4 }}>
+                <span className="label">Payout wallet address</span>
+                <input className="input mono" value={addr} spellCheck={false} autoFocus
+                  onChange={(e) => setAddr(e.target.value)} placeholder="0x…"
+                  onKeyDown={(e) => e.key === "Enter" && addr && onConnect(addr)} />
+                <button className="btn btn-secondary btn-sm" style={{ justifyContent: "center", marginTop: 8 }} disabled={!addr} onClick={() => onConnect(addr)}>Use this address</button>
+              </div>
+            )}
           <div className="gate-bullets">
             <div className="gate-bullet"><IconPlug /> <span>Wrap any API with one command — no signups, no keys for callers.</span></div>
             <div className="gate-bullet"><IconShield /> <span>Charge verified humans one price, anonymous bots another.</span></div>
-            <div className="gate-bullet"><IconCheck /> <span>Every payment settles on Hedera testnet with a real receipt.</span></div>
+            <div className="gate-bullet"><IconCheck /> <span>Every payment settles to your wallet on Hedera testnet with a real receipt.</span></div>
           </div>
         </div>
       </div>
@@ -148,7 +165,8 @@ function Dashboard({ wallet, onDisconnect }: { wallet: string; onDisconnect: () 
       setLanes((prev) => {
         const existed = prev.has(lane.name);
         const next = new Map(prev).set(lane.name, lane);
-        const mine = sameAddr(lane.owner, wallet) || sameAddr(lane.payTo, wallet);
+        const mineSet = new Set(walletAliases(wallet).map((a) => a.toLowerCase()));
+        const mine = mineSet.has((lane.owner ?? "").toLowerCase()) || mineSet.has((lane.payTo ?? "").toLowerCase());
         if (mine && !existed && live) {
           pushToast(`✅ ${lane.name} connected — you're taking payments`, "win");
         }
@@ -242,12 +260,13 @@ function Dashboard({ wallet, onDisconnect }: { wallet: string; onDisconnect: () 
   /* ---- live testnet balance from the Hedera mirror node ---- */
   useEffect(() => {
     let stop = false;
+    const account = balanceAccountFor(wallet);
     const pull = async () => {
-      const b = await fetchHbarBalance(wallet);
+      const b = await fetchHbarBalance(account);
       if (!stop && b != null) setBalance(b);
     };
     pull();
-    const iv = setInterval(pull, 7000);
+    const iv = setInterval(pull, 3000); // money-shot: balance grows as payments settle
     return () => { stop = true; clearInterval(iv); };
   }, [wallet]);
 
@@ -257,17 +276,20 @@ function Dashboard({ wallet, onDisconnect }: { wallet: string; onDisconnect: () 
     return () => clearInterval(iv);
   }, []);
 
-  /* ---- derived, scoped to the connected wallet ---- */
+  /* ---- derived, scoped to the connected wallet (alias-aware: the seller may be
+     labelled by EVM address or by Hedera account id across the stack) ---- */
+  const aliases = useMemo(() => new Set(walletAliases(wallet).map((a) => a.toLowerCase())), [wallet]);
+  const isMine = useCallback((addr?: string) => !!addr && aliases.has(addr.toLowerCase()), [aliases]);
   const myLanes = useMemo(
-    () => [...lanes.values()].filter((l) => sameAddr(l.owner, wallet) || sameAddr(l.payTo, wallet)),
-    [lanes, wallet],
+    () => [...lanes.values()].filter((l) => isMine(l.owner) || isMine(l.payTo)),
+    [lanes, isMine],
   );
   const myLaneNames = useMemo(() => new Set(myLanes.map((l) => l.name)), [myLanes]);
   const myPayments = useMemo(
     () => [...payments.values()]
-      .filter((p) => myLaneNames.has(p.lane) || sameAddr(p.payTo, wallet))
+      .filter((p) => myLaneNames.has(p.lane) || isMine(p.payTo))
       .sort((a, b) => b.t - a.t),
-    [payments, myLaneNames, wallet],
+    [payments, myLaneNames, isMine],
   );
   const settledMine = useMemo(() => myPayments.filter((p) => p.status === "settled"), [myPayments]);
   const income = useMemo(() => settledMine.reduce((s, p) => s + p.amount, 0), [settledMine]);
@@ -302,6 +324,7 @@ function Dashboard({ wallet, onDisconnect }: { wallet: string; onDisconnect: () 
           <div className="topbar">
             <div className="crumb">GlassBox402 <span className="crumb-sep">/</span> <strong>{titles[view]}</strong></div>
             <div className="topbar-r">
+              <BalanceChip balance={balance} />
               <span className="net-chip">
                 <span className={"net-dot " + (wsUp ? "live" : "off")} />
                 {wsUp ? "Hub connected" : "Hub offline"}
@@ -390,6 +413,29 @@ function Sidebar(props: {
         </div>
       </div>
     </aside>
+  );
+}
+
+/* Prominent live wallet balance — the money-shot. Pulses green each time it
+   grows as payments settle real HBAR on Hedera testnet. */
+function BalanceChip({ balance }: { balance: number | null }) {
+  const [bumped, setBumped] = useState(false);
+  const prev = useRef<number | null>(null);
+  useEffect(() => {
+    if (balance != null && prev.current != null && balance > prev.current + 1e-9) {
+      setBumped(true);
+      const h = setTimeout(() => setBumped(false), 1100);
+      prev.current = balance;
+      return () => clearTimeout(h);
+    }
+    prev.current = balance;
+  }, [balance]);
+  return (
+    <span className={"bal-chip" + (bumped ? " bump" : "")} title="Live testnet balance — grows as payments settle on Hedera">
+      <IconWallet />
+      <b>{balance == null ? "…" : balance.toFixed(2)}</b>
+      <span className="hbar">ℏ</span>
+    </span>
   );
 }
 
