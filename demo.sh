@@ -45,8 +45,12 @@ x402ify https://www.alphavantage.co/query --price 0.01 --name alphavantage --por
   --query "apikey=$ALPHAVANTAGE_KEY" --sample '/?function=GLOBAL_QUOTE&symbol=IBM' &
 sleep 0.5
 
-echo "🔍 opening the dashboard on http://localhost:5173 …"
-pnpm --filter @glassbox/lens dev &
+echo "🔍 building + serving the dashboard on http://localhost:5173 …"
+# Built, not `vite dev`: the dev server mis-types .wasm as octet-stream, which
+# breaks World's IDKit widget ("Something went wrong", no console error). The
+# production build serves it correctly, so the World ID flow works here.
+pnpm --filter @glassbox/lens exec vite build >/dev/null
+pnpm --filter @glassbox/lens exec vite preview --port 5173 &
 (sleep 3 && open http://localhost:5173) &
 
 sleep 2
