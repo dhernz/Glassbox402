@@ -646,3 +646,26 @@ code { background: var(--bg-inset); color: var(--text-secondary); padding: 3px 8
   .topbar { padding: 0 16px; }
   .crumb { display: none; }
 }
+
+/* World ID session bar (buyer playground) — verify once, then every buy carries
+   a signed token. Unverified is the default state, and it says so plainly. */
+.world-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 14px; margin-bottom: 14px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--surface);
+}
+.world-bar.on { border-color: var(--accent); background: var(--accent-surface); }
+.world-bar svg { width: 16px; height: 16px; color: var(--text-tertiary); flex-shrink: 0; }
+.world-bar.on svg { color: var(--accent); }
+.world-state { font-size: 13px; color: var(--text-secondary); flex: 1; }
+.world-bar.on .world-state { color: var(--text-primary); }
+.world-state .worldid { color: var(--accent); font-weight: 500; }
+.world-exp { font-size: 12px; color: var(--text-tertiary); }
+.world-err { font-size: 12px; color: var(--danger-ink, var(--warning-ink)); width: 100%; }
+.sim-tag {
+  margin-left: 6px; padding: 1px 6px; border-radius: 999px;
+  font-size: 11px; font-weight: 500;
+  color: var(--warning-ink); background: var(--warning-surface, var(--surface-2));
+  border: 1px solid var(--warning-ink);
+}

@@ -190,20 +190,38 @@ export const laneUrl = (lane: Lane) => `http://localhost:${lane.port}${lane.samp
 // body and the on-chain settlement, so the buyer side is verifiably real.
 // GraphQL/POST lanes (e.g. Tally) pass method="POST" + a body (the query); GET
 // lanes leave them undefined so the backend does a plain GET.
-export async function buyUrl(url: string, verified: boolean, method?: string, body?: string): Promise<BuyResult> {
+export async function buyUrl(url: string, verified: boolean, method?: string, body?: string, worldToken?: string): Promise<BuyResult> {
   try {
     const r = await fetch(`${HUB}/testbuyer`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ url, verified, method, body }),
+      body: JSON.stringify({ url, verified, worldToken, method, body }),
     });
     return (await r.json()) as BuyResult;
   } catch (e) {
     return { ok: false, status: 0, error: String(e) };
   }
 }
-export const buyFromLane = (lane: Lane, verified: boolean) =>
-  buyUrl(laneUrl(lane), verified, lane.sampleMethod, lane.sampleBody);
+
+// World ID: verify once, get a short-lived signed token. The gateway checks that
+// signature on every request, so presenting the token is what buys the human
+// tier — claiming to be human no longer does anything.
+export interface WorldVerifyResult { ok: boolean; token?: string; simulated?: boolean; error?: string }
+export async function worldVerify(wallet: string, proof?: unknown): Promise<WorldVerifyResult> {
+  try {
+    const r = await fetch(`${HUB}/world/verify`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ wallet, proof }),
+    });
+    return (await r.json()) as WorldVerifyResult;
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+}
+
+export const buyFromLane = (lane: Lane, verified: boolean, worldToken?: string) =>
+  buyUrl(laneUrl(lane), verified, lane.sampleMethod, lane.sampleBody, worldToken);
 
 // Live testnet balance (HBAR) for the connected wallet, via the Hedera mirror
 // node. Works with the 0x EVM alias. Returns HBAR (not tinybars), or null.

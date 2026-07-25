@@ -51,7 +51,9 @@ const mockApi = createServer((req, res) => {
 
 run(["--filter", "@glassbox/core", "exec", "tsx", "src/hub.ts", "--tape", TAPE]);
 await waitFor(HUB);
-run(["--filter", "@glassbox/core", "exec", "tsx", "src/x402ify.ts", "http://localhost:4889", "--price", "0.01", "--name", "mockapi", "--port", "4890"]);
+run(["--filter", "@glassbox/core", "exec", "tsx", "src/x402ify.ts", "http://localhost:4889", "--price", "0.01", "--name", "mockapi", "--port", "4890",
+  // required since x402ify stopped hard-coding a payTo (85ad63e)
+  "--wallet", "0x2403506eddcd48207ee982d7a8f86901365192ed"]);
 await waitFor(`${LANE}/anything`).catch(() => {}); // lane answers 402 — that IS reachable
 await new Promise((r) => setTimeout(r, 400));
 

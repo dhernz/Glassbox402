@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  api, sendTestBuyer, buyFromLane, buyUrl, fetchHbarBalance, balanceAccountFor, walletAliases,
-  shortAddr, avatarGradient, hostOf, usd, ago, connectMetaMask, hashscanAccount,
+  api, sendTestBuyer, buyFromLane, buyUrl, worldVerify, fetchHbarBalance, balanceAccountFor, walletAliases,
+  shortAddr, avatarGradient, hostOf, usd, ago, connectMetaMask, hashscanAccount, DEFAULT_WALLET,
   type GBEvent, type Lane, type Payment, type Policy, type Analytics, type Tier,
 } from "./hub";
 import { HUB_WS } from "./hub";
@@ -1213,6 +1213,25 @@ function BuyerPlayground() {
     return () => { closed = true; ws?.close(); };
   }, []);
 
+  // World ID session: verify once, then present the signed token on each buy.
+  // Without a token the gateway prices you as a bot, no matter what you claim.
+  const [world, setWorld] = useState<{ token: string; simulated: boolean; exp: number } | null>(null);
+  const [verifying, setVerifying] = useState(false);
+  const [worldErr, setWorldErr] = useState<string | null>(null);
+  const worldValid = !!world && world.exp > now;
+
+  const doVerify = async () => {
+    setVerifying(true); setWorldErr(null);
+    try {
+      // With Selfie Check enabled on the app this carries a real IDKit proof;
+      // until then the hub mints a signed-but-simulated session and says so.
+      const r = await worldVerify(DEFAULT_WALLET);
+      if (!r.ok || !r.token) { setWorldErr(r.error ?? "verification failed"); return; }
+      const exp = Number(r.token.split(".")[2]) || Date.now() + 15 * 60 * 1000;
+      setWorld({ token: r.token, simulated: !!r.simulated, exp });
+    } finally { setVerifying(false); }
+  };
+
   const priceFor = (lane: Lane, verified: boolean) => {
     const pol = policies[lane.name] ?? {};
     if (verified) return lane.price;
@@ -1222,7 +1241,10 @@ function BuyerPlayground() {
   const run = async (opts: { lane?: Lane; url?: string; verified: boolean; key: string; api: string; host: string; price: number }) => {
     setBusy(opts.key);
     try {
-      const res = opts.lane ? await buyFromLane(opts.lane, opts.verified) : await buyUrl(opts.url!, opts.verified);
+      const token = opts.verified && worldValid ? world!.token : undefined;
+      const res = opts.lane
+        ? await buyFromLane(opts.lane, opts.verified, token)
+        : await buyUrl(opts.url!, opts.verified, undefined, undefined, token);
       const { value, raw } = extractResponse(res.body);
       setReceipts((r) => [{
         id: rid.current++, api: opts.api, host: opts.host,
@@ -1254,6 +1276,32 @@ function BuyerPlayground() {
 
       <div className="buyer-main">
         <div>
+          {/* World ID session — the buyer proves humanity once, then presents a
+              signed token per call. This is what actually buys the human tier. */}
+          <div className={"world-bar" + (worldValid ? " on" : "")}>
+            <IconShield />
+            {worldValid ? (
+              <>
+                <span className="world-state">
+                  Verified with <span className="worldid">World ID</span>
+                  {world!.simulated && <span className="sim-tag">simulated</span>}
+                </span>
+                <span className="world-exp mono">expires in {Math.max(0, Math.round((world!.exp - now) / 60000))}m</span>
+                <button className="btn btn-secondary btn-sm" onClick={() => setWorld(null)}>Forget</button>
+              </>
+            ) : (
+              <>
+                <span className="world-state">
+                  Not verified — you'll be priced as an anonymous bot.
+                </span>
+                <button className="btn btn-primary btn-sm" disabled={verifying} onClick={doVerify}>
+                  {verifying ? "verifying…" : "Verify with World ID"}
+                </button>
+              </>
+            )}
+            {worldErr && <span className="world-err">{worldErr}</span>}
+          </div>
+
           <div className="section-label" style={{ marginBottom: 12 }}>Directory · {lanes.length} API{lanes.length === 1 ? "" : "s"}</div>
 
           <div className="pay-any">
@@ -1288,7 +1336,8 @@ function BuyerPlayground() {
                   </div>
                   <div className="shop-price">Base price <b>{usd(lane.price, 2)}</b> / call</div>
                   <div className="shop-buttons">
-                    <button className="btn btn-primary btn-sm" disabled={busy === humanKey}
+                    <button className="btn btn-primary btn-sm" disabled={busy === humanKey || !worldValid}
+                      title={worldValid ? undefined : "Verify with World ID first — the gateway checks the signature"}
                       onClick={() => run({ lane, verified: true, key: humanKey, api: lane.name, host: hostOf(lane.upstream), price: priceFor(lane, true) })}>
                       <IconShield /> {busy === humanKey ? "buying…" : `Buy as verified human · ${usd(lane.price, 2)}`}
                     </button>

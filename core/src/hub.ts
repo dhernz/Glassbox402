@@ -14,6 +14,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { loadEnv } from "./env.js";
 import { HUB_PORT, gbe, type GBEvent } from "./events.js";
 import { Analytics } from "./analytics.js";
+import { verifyWorldProof, issueSessionToken, worldLive, WORLD_MODE } from "./world.js";
 import { hederaEnabled, ensureTopic, hederaReceipt } from "./hedera.js";
 
 // ./hedera.js reads the operator credentials lazily, inside its functions, so
@@ -159,12 +160,30 @@ const server = createServer(async (req, res) => {
     if (url.pathname === "/analytics") {
       return json(res, 200, analytics.snapshot());
     }
+    // World ID: verify the buyer ONCE, then hand back a short-lived signed token
+    // they present per request. The gateway checks the signature locally, so the
+    // human tier can't be claimed by just setting a header.
+    if (req.method === "POST" && url.pathname === "/world/verify") {
+      const { proof, wallet } = await readBody(req);
+      if (worldLive()) {
+        const v = await verifyWorldProof(proof);
+        if (!v.ok) return json(res, 200, { ok: false, error: v.error });
+        return json(res, 200, { ok: true, token: issueSessionToken(v.nullifier!, false), simulated: false });
+      }
+      // Selfie Check beta not enabled on the app yet: mint a token anyway, but
+      // mark it simulated so every surface can say so. The signature still holds.
+      const pseudo = `sim_${String(wallet ?? "anon").toLowerCase()}`;
+      return json(res, 200, { ok: true, token: issueSessionToken(pseudo, true), simulated: true, mode: WORLD_MODE });
+    }
     if (req.method === "POST" && url.pathname === "/testbuyer") {
-      const { url: target, verified, method, body: sendBody } = await readBody(req);
+      const { url: target, verified, worldToken, method, body: sendBody } = await readBody(req);
       try {
         const { getPaidFetch } = await import("./paid-fetch.js");
         const init: any = { headers: {} };
-        if (verified) init.headers["x-world-proof"] = "demo-verified";
+        // the caller's real token — or, for the seller-side "send test payment"
+        // button (no buyer UI to verify in), a simulated one minted right here.
+        if (worldToken) init.headers["x-world-proof"] = worldToken;
+        else if (verified) init.headers["x-world-proof"] = issueSessionToken("sim_testbuyer", !worldLive());
         if (method && method !== "GET") {
           init.method = method;
           if (sendBody != null) { init.body = typeof sendBody === "string" ? sendBody : JSON.stringify(sendBody); init.headers["content-type"] = "application/json"; }

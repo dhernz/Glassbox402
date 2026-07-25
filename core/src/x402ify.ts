@@ -13,7 +13,7 @@ import { x402ResourceServer, HTTPFacilitatorClient } from "@x402/core/server";
 import { ExactHederaScheme } from "@x402/hedera/exact/server";
 import { decodePaymentResponseHeader } from "@x402/core/http";
 import { emit, gbe, HUB_URL } from "./events.js";
-import { isHumanVerified } from "./world.js";
+import { verifySessionToken } from "./world.js";
 
 const argv = process.argv.slice(2);
 const upstream = argv.find((a) => !a.startsWith("--"));
@@ -43,7 +43,7 @@ const sampleBody = flag("body");
 const toAtomic = (hbar: number) => String(Math.round(hbar * 1e8)); // HBAR → tinybar
 
 // live feature policy (World human-verified tiering), refreshed from the hub.
-let policy: { humanVerifiedOnly?: boolean; botMultiplier?: number } = {};
+let policy: { humanVerifiedOnly?: boolean; botMultiplier?: number; blockBots?: boolean } = {};
 setInterval(async () => {
   try { policy = (await fetch(`${HUB_URL}/policy/${lane}`).then((r) => r.json())).policy ?? {}; } catch {}
 }, 2000);
@@ -51,12 +51,26 @@ setInterval(async () => {
 const x402Server = new x402ResourceServer(new HTTPFacilitatorClient({ url: FACILITATOR }))
   .register("hedera:*", new ExactHederaScheme() as any);
 
-// price varies per request: unverified callers pay the bot multiplier when the
-// human-verified policy is on. Kept sync (policy is cached) as the middleware needs.
+// ONE verification decision per request, used for the quote, the settled amount
+// and the tier label alike. It reads the SIGNATURE of the World session token,
+// not the presence of a header — otherwise `curl -H "x-world-proof: lol"` buys
+// the human tier, and the amount we report drifts from the amount that settled.
+const worldFor = (req: { header(n: string): string | undefined }) =>
+  verifySessionToken(req.header("x-world-proof"));
+
+const priceHbarFor = (verified: boolean) =>
+  policy.humanVerifiedOnly && !verified ? priceHbar * (policy.botMultiplier ?? 10) : priceHbar;
+
+// Kept sync (policy is cached, token check is local) as the middleware needs.
+// The middleware hands us { adapter, path, method, paymentHeader, routePattern } —
+// headers are only reachable through adapter.getHeader(). Reading ctx.headers /
+// ctx.req here silently yields undefined, which is how every caller ended up on
+// the bot tier regardless of what they presented.
 const priceForCtx = (ctx: any) => {
-  const verified = ctx?.headers?.["x-world-proof"] || ctx?.req?.header?.("x-world-proof");
-  const isBot = policy.humanVerifiedOnly && !verified;
-  const hbar = isBot ? priceHbar * (policy.botMultiplier ?? 10) : priceHbar;
+  const token = ctx?.adapter?.getHeader?.("x-world-proof")
+    ?? ctx?.req?.header?.("x-world-proof")
+    ?? ctx?.headers?.["x-world-proof"];
+  const hbar = priceHbarFor(verifySessionToken(token).ok);
   return { amount: toAtomic(hbar), asset: "0.0.0" };
 };
 
@@ -81,12 +95,25 @@ app.use("*", async (c, next) => {
   const path = c.req.path;
   (c as any).set("reqId", reqId);
   await emit(gbe("request_in", lane, reqId, { method: c.req.method, path }));
-  const verified = await isHumanVerified(c.req.header("x-world-proof"));
+  const world = worldFor(c.req);
+  const verified = world.ok;
+
+  // "Block unverified bots entirely" — refuse rather than upsell. Enforced here,
+  // before the payment middleware, so an unverified caller is never even quoted.
+  if (policy.humanVerifiedOnly && policy.blockBots && !verified) {
+    await emit(gbe("blocked", lane, reqId, { reason: "human_verification_required", path }));
+    return c.json({
+      error: "human_verification_required",
+      message: "This API only serves World ID verified humans.",
+    }, 403);
+  }
+
   await next();
 
   const status = c.res.status;
   if (status === 402) {
-    await emit(gbe("quote_402", lane, reqId, { price: priceHbar, payTo, verified }));
+    // quote the price the caller was ACTUALLY asked for, not the base price
+    await emit(gbe("quote_402", lane, reqId, { price: priceHbarFor(verified), payTo, verified }));
     return;
   }
   const settleHeader = c.res.headers.get("payment-response");
@@ -95,9 +122,11 @@ app.use("*", async (c, next) => {
       const s: any = decodePaymentResponseHeader(settleHeader);
       const from = s.payer ?? "unknown";
       const tier = policy.humanVerifiedOnly && !verified ? "bot" : verified ? "human" : "anon";
-      const amount = policy.humanVerifiedOnly && !verified ? priceHbar * (policy.botMultiplier ?? 10) : priceHbar;
-      await emit(gbe("payment_submitted", lane, reqId, { from, amount, tier, verified }));
-      await emit(gbe("settled", lane, reqId, { from, amount, payTo, path, tier, verified, txHash: s.transaction }));
+      // same decision that produced the quote, so what we report is what settled
+      const amount = priceHbarFor(verified);
+      const meta = { from, amount, tier, verified, simulated: world.simulated ?? false };
+      await emit(gbe("payment_submitted", lane, reqId, meta));
+      await emit(gbe("settled", lane, reqId, { ...meta, payTo, path, txHash: s.transaction }));
       if (s.transaction) {
         const hs = `https://hashscan.io/testnet/transaction/${String(s.transaction).replace("@", "-").replace(/\.(\d+)$/, "-$1")}`;
         await emit(gbe("hedera_receipt", lane, reqId, { hashscan: hs, txId: s.transaction }));
