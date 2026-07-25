@@ -1,0 +1,161 @@
+// hub.ts — the Lens's view of the GlassBox402 backend.
+// Types mirror core/src/events.ts + analytics.ts. All HTTP/WS talks to the
+// hub on :4021; the one external call allowed is the Hedera mirror node.
+
+export const HUB = "http://localhost:4021";
+export const HUB_WS = "ws://localhost:4021";
+export const MIRROR = "https://testnet.mirrornode.hedera.com/api/v1";
+
+// Demo seller = Hedera account 0.0.9742887. Payments settle here, so the balance
+// grows on-chain (mirror node resolves it by account id, not by evm alias).
+export const DEFAULT_WALLET = "0.0.9742887";
+
+export interface GBEvent {
+  id: string;
+  reqId: string;
+  lane: string;
+  type: string;
+  t: number;
+  data: Record<string, any>;
+}
+
+export interface Lane {
+  name: string;
+  upstream: string;
+  price: number;
+  payTo: string;
+  owner?: string;
+  port: number;
+  sample: string;
+}
+
+export type Tier = "human" | "bot" | "anon";
+
+// One row in the payments tables — a settled or failed x402 flow, joined with
+// its Hedera receipt by reqId.
+export interface Payment {
+  reqId: string;
+  lane: string;
+  from: string;
+  amount: number;
+  tier: Tier;
+  verified: boolean;
+  path: string;
+  payTo?: string;
+  status: "settled" | "failed";
+  reason?: string;
+  txHash?: string;
+  hashscan?: string; // real Hedera testnet receipt link (from hedera_receipt)
+  t: number;
+}
+
+export interface Policy {
+  humanVerifiedOnly?: boolean;
+  botMultiplier?: number;
+  blockBots?: boolean;
+  streaming?: boolean;
+  streamRate?: number;
+  dynamicPricing?: boolean;
+  priceFloor?: number;
+  priceCeiling?: number;
+}
+
+export interface Analytics {
+  totalIncome: number;
+  totalRequests: number;
+  avgPrice: number;
+  byEndpoint: { key: string; value: number }[];
+  byHour: number[];
+  byCountry: { code: string; name: string; flag: string; value: number }[];
+  byPayer: { payer: string; spend: number; calls: number }[];
+}
+
+async function jget<T>(path: string): Promise<T> {
+  const r = await fetch(`${HUB}${path}`);
+  if (!r.ok) throw new Error(`${path} ${r.status}`);
+  return r.json() as Promise<T>;
+}
+
+export const api = {
+  lanes: () => jget<{ lanes: Lane[] }>("/lanes").then((r) => r.lanes),
+  analytics: () => jget<Analytics>("/analytics"),
+  getPolicy: (lane: string) => jget<{ policy: Policy }>(`/policy/${encodeURIComponent(lane)}`).then((r) => r.policy ?? {}),
+  setPolicy: async (lane: string, patch: Partial<Policy>) => {
+    const r = await fetch(`${HUB}/policy/${encodeURIComponent(lane)}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    return (await r.json()).policy as Policy;
+  },
+  faucet: (addr: string, usd: number) =>
+    fetch(`${HUB}/faucet`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ addr, usd }),
+    }).then((r) => r.json()),
+};
+
+// Drive a real x402 payment through a lane's proxy: fund a test buyer, hit the
+// sample path, read the 402 quote, retry with an X-PAYMENT header. Every hop
+// re-enters the hub as a GBEvent, so the dashboard lights up live.
+export async function sendTestBuyer(lane: Lane): Promise<void> {
+  const buyer = "0x" + "b0b" + Math.random().toString(16).slice(2, 10) + "cafe";
+  const price = Number(lane.price) || 0.01;
+  await api.faucet(buyer, Math.max(0.5, price * 4));
+  const url = `http://localhost:${lane.port}${lane.sample || "/"}`;
+  const first = await fetch(url).catch(() => null);
+  if (!first || first.status !== 402) return;
+  const quote = await first.json().catch(() => null);
+  const amount = Number(quote?.accepts?.[0]?.price ?? price);
+  const xp = btoa(JSON.stringify({ from: buyer, amount }));
+  await fetch(url, { headers: { "x-payment": xp } }).catch(() => null);
+}
+
+// Live testnet balance (HBAR) for the connected wallet, via the Hedera mirror
+// node. Works with the 0x EVM alias. Returns HBAR (not tinybars), or null.
+export async function fetchHbarBalance(addrOrAlias: string): Promise<number | null> {
+  try {
+    const r = await fetch(`${MIRROR}/accounts/${addrOrAlias}`);
+    if (!r.ok) return null;
+    const j = await r.json();
+    const tinybars = Number(j?.balance?.balance);
+    if (!Number.isFinite(tinybars)) return null;
+    return tinybars / 1e8;
+  } catch {
+    return null;
+  }
+}
+
+// ---- formatting helpers ----
+export const sameAddr = (a?: string, b?: string) =>
+  !!a && !!b && a.toLowerCase() === b.toLowerCase();
+
+export function shortAddr(a?: string): string {
+  if (!a) return "unknown";
+  if (!a.startsWith("0x") || a.length <= 13) return a; // agent names / short ids pass through
+  return `${a.slice(0, 6)}…${a.slice(-4)}`;
+}
+
+// A stable gradient per payer, so avatars are recognizable across rows.
+export function avatarGradient(seed: string): string {
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
+  const a = h % 360;
+  const b = (a + 120 + (h % 80)) % 360;
+  return `linear-gradient(135deg, oklch(0.62 0.20 ${a}), oklch(0.58 0.24 ${b}))`;
+}
+
+export function usd(n: number, dp = 2): string {
+  return `$${n.toFixed(dp)}`;
+}
+
+export function ago(t: number, now: number): string {
+  const s = Math.max(0, Math.floor((now - t) / 1000));
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
