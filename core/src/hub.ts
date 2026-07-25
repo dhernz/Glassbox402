@@ -15,7 +15,7 @@ import { loadEnv } from "./env.js";
 import { HUB_PORT, gbe, type GBEvent } from "./events.js";
 import { Analytics } from "./analytics.js";
 import { verifyWorldProof, issueSessionToken, rpContext, worldLive, WORLD_MODE } from "./world.js";
-import { hederaEnabled, ensureTopic, hederaReceipt } from "./hedera.js";
+import { hederaEnabled, ensureTopic, hederaReceipt, resolveOrCreateAccount, type HederaAccount } from "./hedera.js";
 import { serveStatic, distAvailable } from "./static.js";
 
 // ./hedera.js reads the operator credentials lazily, inside its functions, so
@@ -36,6 +36,9 @@ const earnings = new Map<string, number>(); // payTo -> USD
 const lanes = new Map<string, Record<string, unknown>>(); // lane -> lane_up data (MCP discovery)
 const policies = new Map<string, Record<string, unknown>>(); // lane -> feature policy (dashboard toggles)
 const ring: GBEvent[] = []; // last 500 events, replayed to fresh Lens connections
+// wallet (lowercased) -> its Hedera account, resolved once per process. Holds
+// the in-flight promise so concurrent connects share one lazy-create.
+const accounts = new Map<string, Promise<HederaAccount | null>>();
 const RING_MAX = 500;
 
 const wss = new WebSocketServer({ noServer: true });
@@ -198,6 +201,31 @@ const server = createServer(async (req, res) => {
       const pseudo = `sim_${String(wallet ?? "anon").toLowerCase()}`;
       return json(res, 200, { ok: true, token: issueSessionToken(pseudo, true), simulated: true, mode: WORLD_MODE });
     }
+    // Connecting a wallet is where an EVM user becomes a Hedera user. We resolve
+    // the address on the mirror node, and if Hedera has never seen it, a small
+    // transfer lazy-creates the account then and there. In-flight promises are
+    // cached, not just results, so a double-click or a reconnect can't pay to
+    // create the same account twice.
+    if (req.method === "POST" && url.pathname === "/account") {
+      const { addr } = await readBody(req);
+      if (typeof addr !== "string" || !addr.trim()) return json(res, 400, { ok: false, error: "addr required" });
+      const key = addr.trim().toLowerCase();
+      let pending = accounts.get(key);
+      if (!pending) {
+        pending = resolveOrCreateAccount(key).catch((e) => {
+          accounts.delete(key); // a failure shouldn't be cached — let them retry
+          throw e;
+        });
+        accounts.set(key, pending);
+      }
+      try {
+        const acct = await pending;
+        if (!acct) return json(res, 200, { ok: false, error: "unresolved", addr: key });
+        return json(res, 200, { ok: true, ...acct });
+      } catch (e) {
+        return json(res, 200, { ok: false, error: String(e).split("\n")[0], addr: key });
+      }
+    }
     if (req.method === "POST" && url.pathname === "/testbuyer") {
       const { url: target, verified, worldToken, method, body: sendBody } = await readBody(req);
       try {
@@ -296,14 +324,32 @@ server.listen(HUB_PORT, () => {
 // the history; read it back at boot.
 //
 // Deliberately NOT routed through broadcast(): that would re-append every event
-// to the tape, fire a live HCS receipt per historical payment, and push stale
-// events into the ring that fresh dashboards replay. Hydration touches the two
-// aggregates and nothing else. Lanes are filtered later, at /analytics, because
-// gateways only register themselves after the hub is already up.
+// to the tape and fire a live HCS receipt per historical payment. Hydration
+// touches the aggregates and the replay ring, nothing else. Lanes are filtered
+// later, at /analytics, because gateways only register themselves after the hub
+// is already up.
+//
+// The ring matters as much as the aggregates: the dashboard builds its payment
+// list — and therefore its headline income and request counts — from the events
+// a fresh websocket connection replays, NOT from /analytics. Hydrating only the
+// aggregates left a new visitor looking at "Income $0.00, 0 requests, no
+// payments yet" on top of a fully populated Analytics tab.
 function hydrateFromTape() {
   if (seedFile) hydrate(seedFile, "seed");
   hydrate(tapeFile, "tape");
+  // Oldest-first, capped: enough history that the dashboard opens with a real
+  // payment feed, without blowing the 500-event replay budget for live events.
+  const tail = history.slice(-RING_REPLAY);
+  ring.unshift(...tail);
+  history.length = 0;
+  if (tail.length) console.log(`🎞️  replaying ${tail.length} past events to fresh dashboards`);
 }
+
+// Collected during hydration, then trimmed into the ring. Only the event types
+// the payments table joins on — anything else is noise a new tab can't use.
+const history: GBEvent[] = [];
+const RING_REPLAY = 160;
+const REPLAYABLE = new Set(["settled", "hedera_receipt", "hcs_receipt", "policy"]);
 
 function hydrate(file: string, label: string) {
   if (!existsSync(file)) return;
@@ -315,6 +361,7 @@ function hydrate(file: string, label: string) {
       try { ev = JSON.parse(line); } catch { continue } // a half-written last line is normal
       if (ev.type === "settled") { analytics.ingest(ev.lane, ev.data as any, ev.t); payments++; }
       else if (ev.type === "policy") { policies.set(ev.lane, ev.data); policyEvents++; }
+      if (REPLAYABLE.has(ev.type)) history.push(ev);
     }
   } catch (e) {
     return console.error(`${label} hydrate failed:`, String(e).split("\n")[0]);

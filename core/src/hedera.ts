@@ -88,6 +88,64 @@ export async function hederaTransfer(to: string, hbar = 0.001): Promise<HederaRe
   return { txId, topicId: "", hashscan: hashscanTx(txId) };
 }
 
+const MIRROR = "https://testnet.mirrornode.hedera.com/api/v1";
+
+export interface HederaAccount {
+  accountId: string;   // 0.0.x
+  evm: string | null;  // the 0x alias, when the account has one
+  balance: number;     // HBAR
+  created: boolean;    // did WE just bring this account into existence?
+  hashscan: string;
+}
+
+async function lookup(addrOrId: string): Promise<HederaAccount | null> {
+  try {
+    const r = await fetch(`${MIRROR}/accounts/${addrOrId}`);
+    if (!r.ok) return null;
+    const j: any = await r.json();
+    if (!j?.account) return null;
+    return {
+      accountId: j.account,
+      evm: j.evm_address ?? null,
+      balance: Number(j.balance?.balance ?? 0) / 1e8,
+      created: false,
+      hashscan: `https://hashscan.io/testnet/account/${j.account}`,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Resolve a connected wallet to its Hedera account, creating it if it doesn't
+ *  exist yet.
+ *
+ *  This is the "onboard an EVM user to Hedera" moment: a visitor connects a
+ *  MetaMask address that Hedera has never seen, and transferring a little HBAR
+ *  to it lazy-creates the matching account — no signup, no faucet, no extra
+ *  step. Afterwards the address resolves on the mirror node by its 0x form,
+ *  which is why the dashboard no longer needs a hardcoded account-id map.
+ *
+ *  Returns null if Hedera isn't configured, so callers can degrade rather than
+ *  fail — the rest of the dashboard works fine without an account id. */
+export async function resolveOrCreateAccount(addr: string): Promise<HederaAccount | null> {
+  const existing = await lookup(addr);
+  if (existing) return existing;
+  // Only 0x addresses can be lazy-created; a 0.0.x that doesn't resolve is
+  // simply wrong, and inventing one would be worse than reporting nothing.
+  if (!addr.startsWith("0x") || !hederaEnabled()) return null;
+
+  await hederaTransfer(addr, 0.1);
+
+  // Consensus is fast but the mirror node lags it by a beat, so the account is
+  // real before it's queryable. Poll rather than sleep a fixed amount.
+  for (let i = 0; i < 15; i++) {
+    await new Promise((r) => setTimeout(r, 400));
+    const found = await lookup(addr);
+    if (found) return { ...found, created: true };
+  }
+  return null;
+}
+
 // Settlement the operator can WATCH: real HBAR moves to the seller (the connected
 // wallet), so their balance grows on-chain. hbar is scaled from the USD price so
 // the growth is visible in the demo.

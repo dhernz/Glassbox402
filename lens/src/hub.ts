@@ -14,38 +14,51 @@ export const HUB = "";
 export const HUB_WS = `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/ws`;
 export const MIRROR = "https://testnet.mirrornode.hedera.com/api/v1";
 
-// Demo seller = Hedera account 0.0.9742887 (EVM address 0xcca7…dd55). Payments
-// settle here and the balance grows on-chain. The connected-wallet identity is
-// the EVM address (shown in the UI and the `--wallet` convert command); the
-// mirror-node balance is fetched by account id, since this account has no EVM
-// alias registered and its 0x form doesn't resolve on the mirror node.
-export const DEFAULT_WALLET = "0xcca76e7c0b8b19351a83701517c5c2d18b83dd55";
-export const DEFAULT_ACCOUNT_ID = "0.0.9742887";
-
-// wallet (lowercased) → Hedera account id for the balance lookup.
-const BALANCE_ACCOUNT: Record<string, string> = {
-  [DEFAULT_WALLET]: DEFAULT_ACCOUNT_ID,
-};
-export function balanceAccountFor(wallet: string): string {
-  return BALANCE_ACCOUNT[wallet.toLowerCase()] ?? wallet;
+// A connected wallet, once the hub has told us what it is on Hedera.
+//
+// This used to be a hardcoded table mapping one demo address to one account id.
+// It existed because that demo account was made with `setKeyWithoutAlias`, so it
+// has no EVM alias and its 0x form genuinely doesn't resolve on the mirror node.
+// Accounts that get lazy-created by a transfer — which is now every account we
+// hand out — do resolve by their 0x address, so the table isn't needed and,
+// worse, meant anyone else's wallet had no account id at all.
+export interface Account {
+  addr: string;              // the 0x address the user connected
+  accountId: string | null;  // 0.0.x, once resolved
+  balance: number | null;    // HBAR
+  created: boolean;          // did connecting bring this account into existence?
 }
 
-// Different components of the stack may label the seller by EVM address or by
-// account id. Treat them as the same operator so payment scoping matches either.
-const ALIASES: Record<string, string[]> = {
-  [DEFAULT_WALLET]: [DEFAULT_WALLET, DEFAULT_ACCOUNT_ID],
-  [DEFAULT_ACCOUNT_ID]: [DEFAULT_WALLET, DEFAULT_ACCOUNT_ID],
-};
-export function walletAliases(wallet: string): string[] {
-  return ALIASES[wallet.toLowerCase()] ?? ALIASES[wallet] ?? [wallet];
+/** Resolve a connected wallet to its Hedera account, creating it if Hedera has
+ *  never seen it. The create costs the operator a little HBAR, so the hub
+ *  memoizes per address. */
+export async function resolveAccount(addr: string): Promise<Account> {
+  try {
+    const r = await fetch(`${HUB}/account`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ addr }),
+    });
+    const j = await r.json();
+    if (!j?.ok) return { addr, accountId: null, balance: null, created: false };
+    return { addr, accountId: j.accountId, balance: j.balance ?? null, created: !!j.created };
+  } catch {
+    return { addr, accountId: null, balance: null, created: false };
+  }
+}
+
+// The stack labels a seller by EVM address in some places and by Hedera account
+// id in others; both mean the same operator, so ownership checks accept either.
+export function walletAliases(wallet: string, accountId?: string | null): string[] {
+  return accountId ? [wallet, accountId] : [wallet];
 }
 
 // Public Hedera explorer. Judges verify balances + payments OUTSIDE our UI here.
 export const HASHSCAN = "https://hashscan.io/testnet";
-export function hashscanAccount(wallet: string): string {
-  // balanceAccountFor gives the canonical account id when known (default demo
-  // wallet), otherwise the 0x address, which HashScan also resolves.
-  return `${HASHSCAN}/account/${balanceAccountFor(wallet)}`;
+export function hashscanAccount(wallet: string, accountId?: string | null): string {
+  // Prefer the canonical account id; HashScan resolves a 0x address too, but
+  // only once the account actually exists.
+  return `${HASHSCAN}/account/${accountId ?? wallet}`;
 }
 
 export interface GBEvent {

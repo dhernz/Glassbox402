@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  api, sendTestBuyer, buyFromLane, buyUrl, worldVerify, worldContext, fetchHbarBalance, balanceAccountFor, walletAliases,
-  shortAddr, avatarGradient, hostOf, usd, ago, connectMetaMask, hashscanAccount, DEFAULT_WALLET,
+  api, sendTestBuyer, buyFromLane, buyUrl, worldVerify, worldContext, fetchHbarBalance, resolveAccount, walletAliases,
+  shortAddr, avatarGradient, hostOf, usd, ago, connectMetaMask, hashscanAccount, type Account,
   type WorldContext,
   type GBEvent, type Lane, type Payment, type Policy, type Analytics, type Tier,
 } from "./hub";
@@ -26,6 +26,21 @@ import {
 } from "./icons";
 
 const WALLET_KEY = "gb_wallet";
+const BUYER_KEY = "gb_buyer";
+
+// The World ID proof is bound to a signal. On the buyer side there's no wallet
+// to bind to, so each browser gets a stable buyer id — which is also the honest
+// shape of the claim: the rp-scoped nullifier says "one human", and this says
+// which buyer session that human is driving. (It used to be a hardcoded demo
+// address, so every buyer everywhere shared one signal.)
+function buyerId(): string {
+  let id = localStorage.getItem(BUYER_KEY);
+  if (!id) {
+    id = `buyer_${crypto.randomUUID()}`;
+    localStorage.setItem(BUYER_KEY, id);
+  }
+  return id;
+}
 type ViewId = "overview" | "apis" | "payments" | "analytics" | "features" | "settings";
 
 interface Toast { id: number; text: string; kind: "success" | "win"; }
@@ -138,6 +153,8 @@ function Dashboard({ wallet, onDisconnect }: { wallet: string; onDisconnect: () 
   const [hcsTopicUrl, setHcsTopicUrl] = useState(""); // the receipt topic, once the hub opens one
   const [wsUp, setWsUp] = useState(false);
   const [balance, setBalance] = useState<number | null>(null);
+  // The connected wallet's Hedera identity, resolved (or created) by the hub.
+  const [account, setAccount] = useState<Account | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [now, setNow] = useState(Date.now());
 
@@ -303,18 +320,34 @@ function Dashboard({ wallet, onDisconnect }: { wallet: string; onDisconnect: () 
     return () => { stop = true; clearInterval(iv); };
   }, []);
 
+  /* ---- resolve the connected wallet on Hedera, creating the account if this
+     address has never been seen. This is the onboarding moment: an EVM user
+     becomes a Hedera user just by connecting, with no faucet and no signup. ---- */
+  useEffect(() => {
+    let stop = false;
+    setAccount(null);
+    resolveAccount(wallet).then((a) => {
+      if (stop) return;
+      setAccount(a);
+      if (a.created) pushToast(`✅ Hedera account ${a.accountId} created for your wallet`, "win");
+    });
+    return () => { stop = true; };
+  }, [wallet]);
+
   /* ---- live testnet balance from the Hedera mirror node ---- */
   useEffect(() => {
     let stop = false;
-    const account = balanceAccountFor(wallet);
+    // Query by account id once we have it: an address with no account yet
+    // doesn't resolve, and the id keeps working even without an EVM alias.
+    const lookup = account?.accountId ?? wallet;
     const pull = async () => {
-      const b = await fetchHbarBalance(account);
+      const b = await fetchHbarBalance(lookup);
       if (!stop && b != null) setBalance(b);
     };
     pull();
     const iv = setInterval(pull, 3000); // money-shot: balance grows as payments settle
     return () => { stop = true; clearInterval(iv); };
-  }, [wallet]);
+  }, [wallet, account?.accountId]);
 
   /* ---- ticking clock for relative timestamps ---- */
   useEffect(() => {
@@ -322,20 +355,21 @@ function Dashboard({ wallet, onDisconnect }: { wallet: string; onDisconnect: () 
     return () => clearInterval(iv);
   }, []);
 
-  /* ---- derived, scoped to the connected wallet (alias-aware: the seller may be
-     labelled by EVM address or by Hedera account id across the stack) ---- */
-  const aliases = useMemo(() => new Set(walletAliases(wallet).map((a) => a.toLowerCase())), [wallet]);
-  const isMine = useCallback((addr?: string) => !!addr && aliases.has(addr.toLowerCase()), [aliases]);
-  const myLanes = useMemo(
-    () => [...lanes.values()].filter((l) => isMine(l.owner) || isMine(l.payTo)),
-    [lanes, isMine],
+  /* ---- derived. The API directory is PUBLIC: every visitor sees every live
+     x402ified API and the payments flowing through them, because that market is
+     the product — a dashboard scoped to a stranger's fresh wallet would just be
+     empty. isMine() stays, but only to badge the ones the connected wallet owns.
+     Alias-aware: the stack labels a seller by EVM address in some places and by
+     Hedera account id in others. ---- */
+  const aliases = useMemo(
+    () => new Set(walletAliases(wallet, account?.accountId).map((a) => a.toLowerCase())),
+    [wallet, account?.accountId],
   );
-  const myLaneNames = useMemo(() => new Set(myLanes.map((l) => l.name)), [myLanes]);
+  const isMine = useCallback((addr?: string) => !!addr && aliases.has(addr.toLowerCase()), [aliases]);
+  const myLanes = useMemo(() => [...lanes.values()], [lanes]);
   const myPayments = useMemo(
-    () => [...payments.values()]
-      .filter((p) => myLaneNames.has(p.lane) || isMine(p.payTo))
-      .sort((a, b) => b.t - a.t),
-    [payments, myLaneNames, isMine],
+    () => [...payments.values()].sort((a, b) => b.t - a.t),
+    [payments],
   );
   const settledMine = useMemo(() => myPayments.filter((p) => p.status === "settled"), [myPayments]);
   const income = useMemo(() => settledMine.reduce((s, p) => s + p.amount, 0), [settledMine]);
@@ -420,7 +454,7 @@ function Dashboard({ wallet, onDisconnect }: { wallet: string; onDisconnect: () 
                   goOverview={() => setView("overview")}
                 />
               )}
-              {view === "settings" && <Settings wallet={wallet} balance={balance} onDisconnect={onDisconnect} />}
+              {view === "settings" && <Settings wallet={wallet} balance={balance} account={account} onDisconnect={onDisconnect} />}
             </div>
           </div>
         </main>
@@ -517,9 +551,9 @@ function BalanceChip({ balance, wallet }: { balance: number | null; wallet: stri
 }
 
 /* Wallet-level HashScan link — lets judges verify OUTSIDE our UI. */
-function VerifyLink({ wallet, label = "verify on HashScan" }: { wallet: string; label?: string }) {
+function VerifyLink({ wallet, accountId, label = "verify on HashScan" }: { wallet: string; accountId?: string | null; label?: string }) {
   return (
-    <a className="receipt-link" href={hashscanAccount(wallet)} target="_blank" rel="noreferrer"
+    <a className="receipt-link" href={hashscanAccount(wallet, accountId)} target="_blank" rel="noreferrer"
        title="your balance and every payment, on Hedera's public explorer">
       {label} <IconExternal />
     </a>
@@ -1105,7 +1139,7 @@ function Features(props: {
 /* ============================================================
    SETTINGS
    ============================================================ */
-function Settings({ wallet, balance, onDisconnect }: { wallet: string; balance: number | null; onDisconnect: () => void }) {
+function Settings({ wallet, balance, account, onDisconnect }: { wallet: string; balance: number | null; account: Account | null; onDisconnect: () => void }) {
   return (
     <section className="view-fade">
       <div className="page-head"><div><div className="page-title">Settings</div><div className="page-sub">Payout, network and API credentials for this workspace.</div></div></div>
@@ -1115,6 +1149,21 @@ function Settings({ wallet, balance, onDisconnect }: { wallet: string; balance: 
         <div className="set-row">
           <div className="set-k">Settlement wallet<div className="sub">Where settled x402 payments are deposited</div></div>
           <div className="set-v"><span className="keyfield">{shortAddr(wallet)}</span><VerifyLink wallet={wallet} /><button className="disconnect" style={{ width: "auto", marginTop: 0, padding: "6px 12px" }} onClick={onDisconnect}>Disconnect</button></div>
+        </div>
+        <div className="set-row">
+          <div className="set-k">
+            Hedera account
+            <div className="sub">
+              {account?.created
+                ? "Created for this wallet when you connected — no signup, no faucet"
+                : "Your EVM address on Hedera"}
+            </div>
+          </div>
+          <div className="set-v">
+            <span className="keyfield">{account?.accountId ?? "…"}</span>
+            {account?.created && <span className="badge">new</span>}
+            <VerifyLink wallet={wallet} accountId={account?.accountId} label="view on HashScan" />
+          </div>
         </div>
         <div className="set-row">
           <div className="set-k">Testnet balance<div className="sub">Live on Hedera Testnet — also visible in MetaMask (Hedera Testnet network)</div></div>
@@ -1232,6 +1281,7 @@ function BuyerPlayground() {
   const [busy, setBusy] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
   const rid = useRef(1);
+  const BUYER_ID = useMemo(buyerId, []);
 
   useEffect(() => {
     let stop = false;
@@ -1305,7 +1355,7 @@ function BuyerPlayground() {
     if (worldCtx?.live) { setIdkitOpen(true); return; }
     // Not configured: signed session, no human verified — and it says so.
     setVerifying(true);
-    try { acceptToken(await worldVerify(DEFAULT_WALLET)); } finally { setVerifying(false); }
+    try { acceptToken(await worldVerify(BUYER_ID)); } finally { setVerifying(false); }
   };
 
   const priceFor = (lane: Lane, verified: boolean) => {
@@ -1384,10 +1434,10 @@ function BuyerPlayground() {
                 action={worldCtx.action!}
                 rp_context={worldCtx.rp_context}
                 allow_legacy_proofs={true}
-                preset={presetFor(worldCtx.credential, DEFAULT_WALLET)}
+                preset={presetFor(worldCtx.credential, BUYER_ID)}
                 // World returns the proof here; the hub is what checks it with
                 // World and mints the session token. The browser never decides.
-                handleVerify={async (result: unknown) => { acceptToken(await worldVerify(DEFAULT_WALLET, result)); }}
+                handleVerify={async (result: unknown) => { acceptToken(await worldVerify(BUYER_ID, result)); }}
                 onSuccess={() => setIdkitOpen(false)}
               />
             )}
