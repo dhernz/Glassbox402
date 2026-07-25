@@ -17,6 +17,7 @@ export type GBEventType =
   | "feed_tick" // hero: a paid data update — { source, value, unit, paid, wallet, balance }
   | "feed_frozen" // hero: the feed stopped because the wallet is empty — { wallet }
   | "signal" // the watcher acted on purchased data
+  | "policy" // a lane's feature policy changed (dashboard toggle)
   | "faucet"; // a wallet got funded
 
 export interface GBEvent {

@@ -10,6 +10,13 @@
 import { createServer } from "node:http";
 import { emit, gbe, HUB_URL } from "./events.js";
 import { hederaEnabled, hederaReceipt } from "./hedera.js";
+import { isHumanVerified } from "./world.js";
+
+// live per-lane feature policy, refreshed from the hub (dashboard toggles).
+let policy: { humanVerifiedOnly?: boolean; botMultiplier?: number; blockBots?: boolean; streaming?: boolean } = {};
+async function refreshPolicy(lane: string) {
+  try { policy = (await fetch(`${HUB_URL}/policy/${lane}`).then((r) => r.json())).policy ?? {}; } catch {}
+}
 
 // opt-in: mirror each cleared payment onto Hedera testnet as a real HCS receipt.
 // async + fire-and-forget so it never slows or breaks the payment itself.
@@ -33,16 +40,17 @@ const lane = flag("name", new URL(upstream).hostname.replace(/^api\./, "").split
 const port = Number(flag("port", "4030"));
 const sample = flag("sample", "/")!; // a known-good path, used by the Lens "send test buyer" button
 
-const quote = () => ({
+const quote = (p: number, extra: Record<string, unknown> = {}) => ({
   x402Version: 1,
   accepts: [{
     scheme: "exact",
     network: "glassbox-sim",
     asset: "USDC",
-    price: String(price),
+    price: String(p),
     payTo,
     resource: lane,
     description: `${lane} via GlassBox402`,
+    ...extra,
   }],
 });
 
@@ -57,11 +65,26 @@ const server = createServer(async (req, res) => {
 
   await emit(gbe("request_in", lane, reqId, { method: req.method, path }));
 
+  // Feature policy (World human-verification tier), refreshed live from dashboard toggles.
+  await refreshPolicy(lane);
+  const verified = await isHumanVerified(req.headers["x-world-proof"] as string | undefined);
+  let effPrice = price;
+  let tier: "human" | "bot" | "anon" = verified ? "human" : "anon";
+  if (policy.humanVerifiedOnly && !verified) {
+    if (policy.blockBots) {
+      await emit(gbe("verify_fail", lane, reqId, { from: "unknown", amount: 0, reason: "human_verification_required", tier: "bot" }));
+      res.writeHead(402, { "content-type": "application/json", ...corsHeaders() });
+      return res.end(JSON.stringify(quote(price, { error: "human_verification_required" })));
+    }
+    effPrice = price * (policy.botMultiplier ?? 10); // unverified bots pay more
+    tier = "bot";
+  }
+
   const payment = req.headers["x-payment"];
   if (!payment) {
-    await emit(gbe("quote_402", lane, reqId, { price, payTo }));
+    await emit(gbe("quote_402", lane, reqId, { price: effPrice, payTo, tier, verified }));
     res.writeHead(402, { "content-type": "application/json", ...corsHeaders() });
-    return res.end(JSON.stringify(quote()));
+    return res.end(JSON.stringify(quote(effPrice, { tier })));
   }
 
   // decode X-PAYMENT (base64 JSON: { from, amount })
@@ -70,25 +93,25 @@ const server = createServer(async (req, res) => {
     const decoded = JSON.parse(Buffer.from(String(payment), "base64").toString());
     from = decoded.from ?? "unknown";
   } catch {}
-  await emit(gbe("payment_submitted", lane, reqId, { from, amount: price }));
+  await emit(gbe("payment_submitted", lane, reqId, { from, amount: effPrice, tier, verified }));
 
-  // verify + settle through the (sim) facilitator on the hub
+  // verify + settle through the facilitator on the hub
   const settle = await fetch(`${HUB_URL}/settle`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ from, to: payTo, usd: price }),
+    body: JSON.stringify({ from, to: payTo, usd: effPrice }),
   }).then((r) => r.json()).catch(() => ({ ok: false, reason: "facilitator_unreachable" }));
 
   if (!settle.ok) {
-    await emit(gbe("verify_fail", lane, reqId, { from, amount: price, reason: settle.reason }));
+    await emit(gbe("verify_fail", lane, reqId, { from, amount: effPrice, reason: settle.reason, tier }));
     res.writeHead(402, { "content-type": "application/json", ...corsHeaders() });
-    return res.end(JSON.stringify({ ...quote(), error: settle.reason }));
+    return res.end(JSON.stringify({ ...quote(effPrice), error: settle.reason }));
   }
-  await emit(gbe("verify_ok", lane, reqId, { from, amount: price }));
-  await emit(gbe("settled", lane, reqId, { from, amount: price, txHash: settle.txHash, payTo }));
+  await emit(gbe("verify_ok", lane, reqId, { from, amount: effPrice, tier, verified }));
+  await emit(gbe("settled", lane, reqId, { from, amount: effPrice, txHash: settle.txHash, payTo, path, tier, verified, ua: String(req.headers["user-agent"] ?? "") }));
 
   if (HEDERA_LIVE) {
-    hederaReceipt(JSON.stringify({ lane, from, amount: price, payTo }))
+    hederaReceipt(JSON.stringify({ lane, from, amount: effPrice, payTo }))
       .then((r) => emit(gbe("hedera_receipt", lane, reqId, { hashscan: r.hashscan, topicId: r.topicId, txId: r.txId })))
       .catch((e) => console.error("hedera receipt failed:", String(e)));
   }

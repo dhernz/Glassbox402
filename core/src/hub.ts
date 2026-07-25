@@ -9,6 +9,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { appendFileSync, readFileSync } from "node:fs";
 import { WebSocketServer, WebSocket } from "ws";
 import { HUB_PORT, type GBEvent } from "./events.js";
+import { Analytics } from "./analytics.js";
 
 const args = process.argv.slice(2);
 const replayFile = args.includes("--replay") ? args[args.indexOf("--replay") + 1] : null;
@@ -17,13 +18,17 @@ const tapeFile = args.includes("--tape") ? args[args.indexOf("--tape") + 1] : "t
 const balances = new Map<string, number>(); // wallet -> USD
 const earnings = new Map<string, number>(); // payTo -> USD
 const lanes = new Map<string, Record<string, unknown>>(); // lane -> lane_up data (MCP discovery)
+const policies = new Map<string, Record<string, unknown>>(); // lane -> feature policy (dashboard toggles)
 const ring: GBEvent[] = []; // last 500 events, replayed to fresh Lens connections
 const RING_MAX = 500;
 
 const wss = new WebSocketServer({ noServer: true });
 
+const analytics = new Analytics();
+
 function broadcast(ev: GBEvent, record = true) {
   if (ev.type === "lane_up") lanes.set(ev.lane, { name: ev.lane, ...ev.data });
+  if (ev.type === "settled") analytics.ingest(ev.data as any);
   ring.push(ev);
   if (ring.length > RING_MAX) ring.shift();
   if (record && !replayFile) {
@@ -75,6 +80,19 @@ const server = createServer(async (req, res) => {
     }
     if (url.pathname === "/lanes") {
       return json(res, 200, { lanes: [...lanes.values()] });
+    }
+    if (url.pathname === "/analytics") {
+      return json(res, 200, analytics.snapshot());
+    }
+    if (url.pathname.startsWith("/policy/")) {
+      const lane = url.pathname.slice("/policy/".length);
+      if (req.method === "POST") {
+        const body = await readBody(req);
+        policies.set(lane, { ...(policies.get(lane) ?? {}), ...body });
+        broadcast({ id: crypto.randomUUID(), reqId: crypto.randomUUID(), lane, type: "policy", t: Date.now(), data: policies.get(lane)! });
+        return json(res, 200, { ok: true, policy: policies.get(lane) });
+      }
+      return json(res, 200, { policy: policies.get(lane) ?? {} });
     }
     if (url.pathname === "/balances") {
       return json(res, 200, {
