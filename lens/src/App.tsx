@@ -1404,7 +1404,6 @@ function BuyerPlayground() {
             <div className="buyer-sub">an agent shopping the x402 market — pay per call, get the data, settle on Hedera</div>
           </div>
         </div>
-        <a className="net-chip" href="/" title="Back to the seller dashboard">← Seller dashboard</a>
       </div>
 
       <div className="buyer-main">
