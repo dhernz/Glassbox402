@@ -132,13 +132,26 @@ as a **hex string**. We needed it to prove our signature recovered to the regist
 Worth a documented example, since "is my signature right?" is the first question when the
 widget fails.
 
-### 2.7 🟡 Legacy presets return legacy-shaped proofs
+### 2.7 🟡 The Selfie Check response identifier (`face`) is undocumented
 
-`selfieCheckLegacy` returns a 3.0-shaped payload (`nullifier_hash`, `merkle_root`, `proof`),
-but the verify docs lead with the 4.0 `responses[]` array. We validated for `responses[]`
-and rejected our own valid selfie proof as `malformed_proof` before it ever reached World.
-The docs should state, next to each `*Legacy` preset, which payload shape `handleVerify`
-receives.
+Despite the `*Legacy` name, `selfieCheckLegacy` returns a **World ID 4.0** payload:
+
+```
+keys = [action, environment, nonce, protocol_version, responses, user_presence_completed]
+responses[0].identifier = "face"
+```
+
+`face` is the string a relying party must branch on to know which credential it actually
+received — and it appears nowhere in the documentation we could find. The verify reference
+uses `proof_of_human` in every example, and the Selfie Check credential page gives no
+identifier at all. We only learned it by logging the payload after a successful scan.
+
+This matters for any RP accepting more than one credential: you cannot tell a selfie
+verification from an Orb verification without knowing the identifier strings, and getting it
+wrong means silently treating a low-assurance signal as a high-assurance one. **Please
+publish the identifier for each credential next to its preset.** Relatedly, the `*Legacy`
+suffix on a preset that returns a 4.0 payload is confusing — we assumed it implied a 3.0
+response shape and wrote (unnecessary) compatibility handling for one.
 
 ### 2.8 🟡 Selfie Check beta access / sandbox is a hackathon blocker
 
@@ -180,12 +193,28 @@ A self-serve toggle in the Developer Portal (even rate-limited) would remove it.
   mid-flow. For our buyer-agent context this is acceptable (it's a one-time setup per
   session), but for a checkout-style flow it would be the dominant source of abandonment.
 
-### 3.2 Selfie capture flow
+### 3.2 Selfie capture flow — the best part of the integration
 
-*Pending the live run — to be filled in immediately after the first successful scan.*
-Specifically recording: time from QR scan to result, number of retries, lighting/framing
-failures, whether the on-screen guidance was sufficient, and whether the user understood
-what the result meant.
+**First attempt succeeded. No retries. Tester's own words: "such a seamless experience."**
+
+Indoor venue lighting, handheld, iPhone, device-level World App account, first time using
+Selfie Check. No framing corrections, no lighting warnings, no re-takes, and the tester
+raised no complaint about any step of the capture itself.
+
+This is worth stating plainly because it inverts the assumption we started with: we expected
+the biometric capture to be the friction point and the setup to be trivial, and it was the
+exact opposite. **Every minute we lost was on the developer side (§2); the user side worked
+first try.** For a credential whose whole pitch is "low-friction liveness", that pitch held
+up under a cold first-time test.
+
+Not instrumented, and worth measuring properly in a longer study: wall-clock time from QR
+scan to result, and behaviour under poor lighting or with glasses/hats. We recorded the
+retry count (one attempt) but did not time the flow.
+
+**Drop-off implication:** with capture this reliable, the abandonment risk in our flow sits
+almost entirely at the *desktop→phone handoff* (§3.1), not at the selfie. If World wants to
+reduce drop-off for RPs like us, the QR-screen wording is a higher-leverage target than the
+capture UX.
 
 ### 3.3 Comprehension of the *result*
 
@@ -239,8 +268,20 @@ Selfie Check fits agent-economy pricing better than Orb-grade proof: the decisio
 gated is a price tier, so the friction should be proportionate — and the rp-scoped nullifier
 gives exactly the "one human, many agents" primitive that wallet-based limits can't.
 
-The integration itself is sound and the crypto worked first try. **The cost was almost
-entirely diagnostic**: a bundler-level wasm problem presented as an unexplained failure with
-no console output and no network request, behind an error UI that says the same thing for
-every cause. Fix the error specificity (§2.1, §2.2) and document the legacy payload shape
-(§2.7) and this becomes a 20-minute integration.
+The integration itself is sound and the crypto worked first try. **The end-user experience
+was excellent — one selfie attempt, no retries, described unprompted as "seamless" by a
+first-time user.** The credential delivers on low-friction liveness.
+
+**The cost was almost entirely developer-side and almost entirely diagnostic**: a
+bundler-level wasm problem presented as an unexplained failure with no console output and no
+network request, behind an error UI that says the same thing for every cause. Fix the error
+specificity (§2.1, §2.2) and publish the credential identifiers (§2.7) and this becomes a
+20-minute integration.
+
+Ranked asks, if you only do three:
+1. **Distinguish wasm-init failure from everything else in the error UI** (§2.1) — this alone
+   was ~40 minutes and sent us investigating our RP registration and signature instead.
+2. **Publish the response `identifier` per credential** (`face` for Selfie Check) (§2.7) — an
+   RP accepting multiple credentials cannot currently tell them apart from the docs.
+3. **Flag `rp_id` vs `app_id` on the app's portal page** (§2.4) — the wrong choice fails only
+   after a real user has completed a real selfie, which is the worst possible place to fail.

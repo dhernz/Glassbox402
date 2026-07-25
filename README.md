@@ -46,7 +46,7 @@ your API  ->  x402ify (wrap)  ->  @x402 paymentMiddleware  ->  blocky402 facilit
 ## Partners
 
 - **Hedera** every payment settles and is receipted on Hedera testnet, with real transactions and HashScan links.
-- **World** human-verified pricing: callers who prove they are a real human (World ID) pay the base price, anonymous bots pay more.
+- **World** human-verified pricing via **World ID Selfie Check**: a caller who proves a real, live person is behind them pays the base price; unverified bots pay 10× or are refused. Not a login — a per-request pricing and abuse-prevention signal, bound to the rp-scoped nullifier so one human means one session no matter how many wallets their agent rotates through. Integration notes plus developer and user testing feedback: [WORLD-SELFIE-CHECK.md](./WORLD-SELFIE-CHECK.md).
 - **The Graph** a monetized Graph subgraph as one of the demo APIs (pay-per-query on-chain data).
 
 ## Real APIs we x402ified
