@@ -551,7 +551,7 @@ function BalanceChip({ balance, wallet }: { balance: number | null; wallet: stri
        title="Live testnet balance — verify it and every payment on Hedera's public explorer (HashScan)">
       <IconWallet />
       <b>{balance == null ? "…" : balance.toFixed(2)}</b>
-      <span className="hbar">ℏ</span>
+      <span className="hbar-unit">ℏ</span>
       <IconExternal />
     </a>
   );
@@ -642,14 +642,54 @@ function Stat({ label, val, foot }: { label: string; val: string; foot: string }
   );
 }
 
+type ConnectMode = "cli" | "claude" | "codex";
+const CONNECT_MODES: { id: ConnectMode; label: string }[] = [
+  { id: "cli", label: "CLI" },
+  { id: "claude", label: "Claude" },
+  { id: "codex", label: "Codex" },
+];
+
+// The agent prompt has to carry everything the CLI flags carry, because whoever
+// pastes it won't know the flags: where payment goes, what a sample path is for,
+// and that "done" means a real 402-then-pay round trip, not just a running
+// process. Written for a coding agent with a terminal, not for a chat window.
+function agentPrompt(url: string, wallet: string, tool: "Claude Code" | "Codex"): string {
+  return [
+    `Use ${tool} to put my API behind x402 pay-per-call so AI agents can pay to use it.`,
+    ``,
+    `API: ${url}`,
+    `Price: 0.01 HBAR per request`,
+    `Payouts go to: ${wallet}`,
+    ``,
+    `Run:`,
+    `  npx x402ify ${url} --price 0.01 --wallet ${wallet}`,
+    ``,
+    `Notes:`,
+    `- If the API needs a key, keep it on my machine — pass it with --header "Name: value"`,
+    `  or --query "key=value" so it never reaches the caller.`,
+    `- Add --sample "/some/path" pointing at a cheap real endpoint, so the gateway`,
+    `  has something to prove itself with.`,
+    `- Then verify: curl the sample path, confirm it answers 402 with a price, and`,
+    `  tell me the local gateway URL. Don't report success on a running process alone.`,
+  ].join("\n");
+}
+
 function ConnectApiCard({ wallet, hero }: { wallet: string; hero: boolean }) {
-  const cmd = `npx x402ify https://your-api.com --price 0.01 --wallet ${wallet}`;
+  const [mode, setMode] = useState<ConnectMode>("cli");
+  const [url, setUrl] = useState("");
   const [copied, setCopied] = useState(false);
+  const apiUrl = url.trim() || "https://your-api.com";
+
+  const text = mode === "cli"
+    ? `npx x402ify ${apiUrl} --price 0.01 --wallet ${wallet}`
+    : agentPrompt(apiUrl, wallet, mode === "claude" ? "Claude Code" : "Codex");
+
   const copy = () => {
-    navigator.clipboard?.writeText(cmd).catch(() => {});
+    navigator.clipboard?.writeText(text).catch(() => {});
     setCopied(true);
     setTimeout(() => setCopied(false), 1600);
   };
+
   return (
     <div className={"connect-card" + (hero ? " hero" : "")}>
       <div className="connect-top">
@@ -661,16 +701,53 @@ function ConnectApiCard({ wallet, hero }: { wallet: string; hero: boolean }) {
         </div>
         <span className="badge accent"><span className="bdot" />Gateway v2</span>
       </div>
-      <div className="term">
-        <span className="term-prompt">$</span>
-        <div className="term-cmd">
-          npx x402ify https://your-api.com <span className="flag">--price</span> <span className="val">0.01</span> <span className="flag">--wallet</span> <span className="wal">{shortAddr(wallet)}</span>
+
+      <div className="connect-controls">
+        <input
+          className="input mono connect-url"
+          placeholder="https://your-api.com"
+          value={url}
+          spellCheck={false}
+          onChange={(e) => setUrl(e.target.value)}
+        />
+        <div className="seg">
+          {CONNECT_MODES.map((m) => (
+            <button
+              key={m.id}
+              className={"seg-btn" + (mode === m.id ? " on" : "")}
+              onClick={() => setMode(m.id)}
+            >
+              {m.label}
+            </button>
+          ))}
         </div>
-        <button className="copy-btn" onClick={copy}>
-          {copied ? <IconCheck /> : <IconCopy />}{copied ? "Copied" : "Copy"}
-        </button>
       </div>
-      <div className="listen"><span className="pulse-dot" /> Listening for your gateway…&nbsp; the API appears here the moment it comes online.</div>
+
+      {mode === "cli" ? (
+        <div className="term">
+          <span className="term-prompt">$</span>
+          <div className="term-cmd">
+            npx x402ify {apiUrl} <span className="flag">--price</span> <span className="val">0.01</span> <span className="flag">--wallet</span> <span className="wal">{shortAddr(wallet)}</span>
+          </div>
+          <button className="copy-btn" onClick={copy}>
+            {copied ? <IconCheck /> : <IconCopy />}{copied ? "Copied" : "Copy"}
+          </button>
+        </div>
+      ) : (
+        <div className="term term-prose">
+          <pre className="term-prompt-text">{text}</pre>
+          <button className="copy-btn" onClick={copy}>
+            {copied ? <IconCheck /> : <IconCopy />}{copied ? "Copied" : "Copy"}
+          </button>
+        </div>
+      )}
+
+      <div className="listen">
+        <span className="pulse-dot" />
+        {mode === "cli"
+          ? <>Listening for your gateway…&nbsp; the API appears here the moment it comes online.</>
+          : <>Paste this into {mode === "claude" ? "Claude Code" : "Codex"}. Your API appears here the moment its gateway comes online.</>}
+      </div>
     </div>
   );
 }
