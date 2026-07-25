@@ -156,6 +156,9 @@ code { background: var(--bg-inset); color: var(--text-secondary); padding: 3px 8
 .wallet-bal { display: flex; align-items: baseline; justify-content: space-between; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
 .wallet-bal-l { font-size: 12px; color: var(--text-tertiary); }
 .wallet-bal-v { font-family: var(--font-mono); font-size: 14px; color: var(--text-primary); font-weight: 500; font-variant-numeric: tabular-nums; }
+.wallet-verify { margin-top: 8px; }
+.wallet-verify .receipt-link { font-size: 13px; }
+.wallet-note { font-size: 11px; color: var(--text-tertiary); margin-top: 4px; line-height: 1.4; }
 .disconnect {
   margin-top: 10px; width: 100%; font-size: 13px; font-weight: 500;
   padding: 7px; border-radius: 7px; cursor: pointer;
@@ -208,9 +211,12 @@ code { background: var(--bg-inset); color: var(--text-secondary); padding: 3px 8
   padding: 5px 12px; border-radius: 999px;
   background: var(--accent-subtle); border: 1px solid var(--accent-subtle);
   color: var(--accent); font-size: 15px; font-weight: 500;
+  text-decoration: none; cursor: pointer;
   transition: background 200ms var(--ease-out), border-color 200ms var(--ease-out), transform 200ms var(--ease-out);
 }
+.bal-chip:hover { border-color: var(--accent); }
 .bal-chip svg { width: 15px; height: 15px; align-self: center; }
+.bal-chip svg:last-child { width: 13px; height: 13px; opacity: 0.6; }
 .bal-chip b { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 600; color: var(--text-primary); }
 .bal-chip .hbar { font-size: 13px; color: var(--accent); }
 .bal-chip.bump {
@@ -557,6 +563,67 @@ code { background: var(--bg-inset); color: var(--text-secondary); padding: 3px 8
 .toast.success svg { width: 16px; height: 16px; color: var(--success); }
 .toast.win { background: linear-gradient(120deg, var(--accent), oklch(0.5 0.22 290)); }
 @keyframes toast-in { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+/* ============================================================
+   APIS view — per-API income table
+   ============================================================ */
+.api-total { text-align: right; flex-shrink: 0; }
+.api-total-l { font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-tertiary); }
+.api-total-v { font-size: 26px; font-weight: 600; color: var(--text-primary); letter-spacing: -0.01em; font-variant-numeric: tabular-nums; margin-top: 2px; }
+.api-total-s { font-size: 13px; color: var(--text-secondary); margin-top: 2px; }
+
+.cols-api { grid-template-columns: minmax(200px, 2.2fr) 96px 96px 108px 116px 240px; gap: 12px; min-width: 900px; }
+.api-id { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.api-id-meta { min-width: 0; }
+.api-name { font-size: 14px; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.api-host { font-size: 13px; color: var(--text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chain-badge {
+  font-size: 12px; font-weight: 500; padding: 3px 9px; border-radius: 999px;
+  background: var(--accent-subtle); color: var(--accent); text-transform: capitalize;
+}
+.income-cell { color: var(--success-ink); font-weight: 600; }
+.api-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
+.api-last { font-size: 13px; color: var(--text-tertiary); white-space: nowrap; }
+.api-actions .btn { padding: 6px 12px; }
+
+/* ============================================================
+   BUYER PLAYGROUND (?app=buyer)
+   ============================================================ */
+.buyer { height: 100vh; overflow-y: auto; background: var(--bg-primary); padding: 28px 32px 64px; }
+.buyer-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; max-width: 1080px; margin: 0 auto 24px; }
+.buyer-brand { display: flex; align-items: center; gap: 12px; }
+.buyer-title { font-size: 24px; font-weight: 600; letter-spacing: -0.02em; color: var(--text-primary); line-height: 1.1; }
+.buyer-sub { font-size: 14px; color: var(--text-secondary); margin-top: 3px; }
+.buyer-head .net-chip { text-decoration: none; }
+.buyer-main { max-width: 1080px; margin: 0 auto; display: grid; grid-template-columns: 1.05fr 0.95fr; gap: 20px; align-items: start; }
+
+.pay-any { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
+.pay-any .input { flex: 1; }
+.pay-any-verified { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-secondary); white-space: nowrap; }
+
+.shop-card { background: var(--bg-overlay); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+.shop-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.shop-id { flex: 1; min-width: 0; }
+.shop-name { font-size: 15px; font-weight: 600; color: var(--text-primary); }
+.shop-host { font-size: 13px; color: var(--text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.shop-price { font-size: 14px; color: var(--text-secondary); margin-bottom: 12px; }
+.shop-price b { color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.shop-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+.shop-buttons .btn { flex: 1; justify-content: center; min-width: 160px; }
+.shop-note { font-size: 12px; color: var(--warning-ink); margin-top: 10px; }
+
+.receipt-card { background: var(--bg-overlay); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin-bottom: 10px; animation: view-in 240ms var(--ease-out); }
+.receipt-card.fail { border-color: oklch(0.58 0.20 25 / 0.4); }
+.receipt-top { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.receipt-api { font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.receipt-price { font-size: 14px; color: var(--text-primary); font-weight: 500; }
+.receipt-body { margin-bottom: 10px; }
+.receipt-val { font-size: 15px; color: var(--text-primary); line-height: 1.5; background: var(--bg-inset); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+.receipt-raw { font-family: var(--font-mono); font-size: 12px; color: var(--text-secondary); background: var(--bg-inset); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin: 0; max-height: 160px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+.receipt-err { font-size: 14px; color: var(--error-ink); background: var(--error-subtle); border-radius: 8px; padding: 10px 12px; }
+.receipt-foot { display: flex; align-items: center; justify-content: space-between; }
+
+@media (max-width: 900px) { .buyer-main { grid-template-columns: 1fr; } }
 
 /* ============================================================
    RESPONSIVE

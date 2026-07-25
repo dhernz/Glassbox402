@@ -32,6 +32,14 @@ export function walletAliases(wallet: string): string[] {
   return ALIASES[wallet.toLowerCase()] ?? ALIASES[wallet] ?? [wallet];
 }
 
+// Public Hedera explorer. Judges verify balances + payments OUTSIDE our UI here.
+export const HASHSCAN = "https://hashscan.io/testnet";
+export function hashscanAccount(wallet: string): string {
+  // balanceAccountFor gives the canonical account id when known (default demo
+  // wallet), otherwise the 0x address, which HashScan also resolves.
+  return `${HASHSCAN}/account/${balanceAccountFor(wallet)}`;
+}
+
 export interface GBEvent {
   id: string;
   reqId: string;
@@ -49,6 +57,12 @@ export interface Lane {
   owner?: string;
   port: number;
   sample: string;
+  chain?: string; // settlement chain, default "hedera"
+}
+
+// upstream URL → host, safely (e.g. https://api.chucknorris.io/x → api.chucknorris.io)
+export function hostOf(upstream: string): string {
+  try { return new URL(upstream).host; } catch { return upstream.replace(/^https?:\/\//, "").split("/")[0]; }
 }
 
 export type Tier = "human" | "bot" | "anon";
@@ -148,13 +162,38 @@ export const api = {
 // on Hedera and every hop streams back over the websocket. `verified` presents a
 // World-ID proof so the human-verified pricing tier applies.
 export async function sendTestBuyer(lane: Lane, verified = false): Promise<void> {
-  const url = `http://localhost:${lane.port}${lane.sample || "/"}`;
-  await fetch(`${HUB}/testbuyer`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ url, verified }),
-  }).catch(() => null);
+  await buyUrl(laneUrl(lane), verified);
 }
+
+// A real signed purchase, with the upstream response + Hedera settlement link.
+export interface BuyResult {
+  ok: boolean;
+  status: number;
+  body?: string;      // the real upstream response the buyer received
+  txHash?: string;
+  hashscan?: string;  // Hedera testnet transaction link
+  verified?: boolean;
+  error?: string;
+}
+
+export const laneUrl = (lane: Lane) => `http://localhost:${lane.port}${lane.sample || "/"}`;
+
+// Buyer Playground: ask the backend to make a REAL signed x402 purchase as the
+// demo buyer — verified=World-ID human, or anonymous bot. Returns the upstream
+// body and the on-chain settlement, so the buyer side is verifiably real.
+export async function buyUrl(url: string, verified: boolean): Promise<BuyResult> {
+  try {
+    const r = await fetch(`${HUB}/testbuyer`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ url, verified }),
+    });
+    return (await r.json()) as BuyResult;
+  } catch (e) {
+    return { ok: false, status: 0, error: String(e) };
+  }
+}
+export const buyFromLane = (lane: Lane, verified: boolean) => buyUrl(laneUrl(lane), verified);
 
 // Live testnet balance (HBAR) for the connected wallet, via the Hedera mirror
 // node. Works with the 0x EVM alias. Returns HBAR (not tinybars), or null.

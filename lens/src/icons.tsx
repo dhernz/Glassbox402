@@ -115,6 +115,14 @@ export const IconExport = (p: P) => (
   </svg>
 );
 
+export const IconApis = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M12 3l9 5-9 5-9-5 9-5Z" />
+    <path d="M3 12l9 5 9-5" />
+    <path d="M3 16l9 5 9-5" />
+  </svg>
+);
+
 export const IconPlug = (p: P) => (
   <svg {...base(p)}>
     <path d="M9 2v6M15 2v6" />

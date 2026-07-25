@@ -48,13 +48,19 @@ async function readBody(req: IncomingMessage): Promise<any> {
   return JSON.parse(Buffer.concat(chunks).toString() || "{}");
 }
 
+const CORS = {
+  "access-control-allow-origin": "*",
+  "access-control-allow-methods": "GET,POST,OPTIONS",
+  "access-control-allow-headers": "content-type",
+};
 function json(res: ServerResponse, code: number, body: unknown) {
-  res.writeHead(code, { "content-type": "application/json", "access-control-allow-origin": "*" });
+  res.writeHead(code, { "content-type": "application/json", ...CORS });
   res.end(JSON.stringify(body));
 }
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", "http://hub");
+  if (req.method === "OPTIONS") { res.writeHead(204, CORS); return res.end(); } // CORS preflight
   try {
     if (req.method === "POST" && url.pathname === "/event") {
       broadcast(await readBody(req));
@@ -90,7 +96,18 @@ const server = createServer(async (req, res) => {
         const { getPaidFetch } = await import("./paid-fetch.js");
         const init = verified ? { headers: { "x-world-proof": "demo-verified" } } : undefined;
         const r = await getPaidFetch()(target, init as any);
-        return json(res, 200, { ok: r.ok, status: r.status });
+        const body = (await r.text()).slice(0, 2000); // the real API response the buyer received
+        let txHash: string | undefined, hashscan: string | undefined;
+        const ph = r.headers.get("payment-response");
+        if (ph) {
+          try {
+            const { decodePaymentResponseHeader } = await import("@x402/core/http");
+            const s: any = decodePaymentResponseHeader(ph);
+            txHash = s.transaction;
+            if (txHash) hashscan = `https://hashscan.io/testnet/transaction/${String(txHash).replace("@", "-").replace(/\.(\d+)$/, "-$1")}`;
+          } catch {}
+        }
+        return json(res, 200, { ok: r.ok, status: r.status, body, txHash, hashscan, verified: !!verified });
       } catch (e) {
         return json(res, 200, { ok: false, error: String(e).split("\n")[0] });
       }

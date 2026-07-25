@@ -1,22 +1,29 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  api, sendTestBuyer, fetchHbarBalance, balanceAccountFor, walletAliases,
-  shortAddr, avatarGradient, usd, ago, connectMetaMask,
+  api, sendTestBuyer, buyFromLane, buyUrl, fetchHbarBalance, balanceAccountFor, walletAliases,
+  shortAddr, avatarGradient, hostOf, usd, ago, connectMetaMask, hashscanAccount,
   type GBEvent, type Lane, type Payment, type Policy, type Analytics, type Tier,
 } from "./hub";
 import { HUB_WS } from "./hub";
 import {
-  IconOverview, IconPayments, IconAnalytics, IconFeatures, IconSettings,
+  IconOverview, IconApis, IconPayments, IconAnalytics, IconFeatures, IconSettings,
   IconCopy, IconCheck, IconExternal, IconWallet, IconShield, IconBolt,
   IconTrend, IconInfo, IconExport, IconPlug,
 } from "./icons";
 
 const WALLET_KEY = "gb_wallet";
-type ViewId = "overview" | "payments" | "analytics" | "features" | "settings";
+type ViewId = "overview" | "apis" | "payments" | "analytics" | "features" | "settings";
 
 interface Toast { id: number; text: string; kind: "success" | "win"; }
+interface ApiStat { lane: Lane; income: number; requests: number; lastT?: number; lastHashscan?: string; }
 
 export default function App() {
+  // Separate buyer page (the market from the agent's side) — no wallet gate.
+  if (new URLSearchParams(location.search).get("app") === "buyer") return <BuyerPlayground />;
+  return <SellerApp />;
+}
+
+function SellerApp() {
   const [wallet, setWallet] = useState<string | null>(() => {
     // deep link: ?wallet=0x… (or #wallet=) auto-connects and persists — handy for demos/sharing
     const q = new URLSearchParams(location.search).get("wallet")
@@ -105,7 +112,7 @@ function ConnectGate({ onConnect }: { onConnect: (a: string) => void }) {
 function Dashboard({ wallet, onDisconnect }: { wallet: string; onDisconnect: () => void }) {
   const [view, setView] = useState<ViewId>(() => {
     const v = new URLSearchParams(location.search).get("view") as ViewId | null;
-    return v && ["overview", "payments", "analytics", "features", "settings"].includes(v) ? v : "overview";
+    return v && ["overview", "apis", "payments", "analytics", "features", "settings"].includes(v) ? v : "overview";
   });
   const [lanes, setLanes] = useState<Map<string, Lane>>(new Map());
   const [payments, setPayments] = useState<Map<string, Payment>>(new Map());
@@ -161,6 +168,7 @@ function Dashboard({ wallet, onDisconnect }: { wallet: string; onDisconnect: () 
         owner: String(ev.data.owner ?? ev.data.payTo ?? ""),
         port: Number(ev.data.port ?? 0),
         sample: String(ev.data.sample ?? "/"),
+        chain: String(ev.data.chain ?? "hedera"),
       };
       setLanes((prev) => {
         const existed = prev.has(lane.name);
@@ -296,6 +304,22 @@ function Dashboard({ wallet, onDisconnect }: { wallet: string; onDisconnect: () 
   const avgPrice = settledMine.length ? income / settledMine.length : 0;
   const hasApis = myLanes.length > 0;
 
+  // per-API income/requests, sorted by income desc — "income of each x402ified API"
+  const perApi = useMemo<ApiStat[]>(() => {
+    const stats = myLanes.map((lane) => {
+      const paid = settledMine.filter((p) => p.lane === lane.name);
+      const last = paid.reduce<Payment | undefined>((m, p) => (!m || p.t > m.t ? p : m), undefined);
+      return {
+        lane,
+        income: paid.reduce((s, p) => s + p.amount, 0),
+        requests: paid.length,
+        lastT: last?.t,
+        lastHashscan: last?.hashscan,
+      };
+    });
+    return stats.sort((a, b) => b.income - a.income);
+  }, [myLanes, settledMine]);
+
   const setPolicyFor = useCallback(async (lane: string, patch: Partial<Policy>) => {
     setPolicies((prev) => new Map(prev).set(lane, { ...(prev.get(lane) ?? {}), ...patch }));
     try { await api.setPolicy(lane, patch); } catch {}
@@ -308,7 +332,7 @@ function Dashboard({ wallet, onDisconnect }: { wallet: string; onDisconnect: () 
   }, [myLanes]);
 
   const titles: Record<ViewId, string> = {
-    overview: "Overview", payments: "Payments", analytics: "Analytics", features: "Features", settings: "Settings",
+    overview: "Overview", apis: "APIs", payments: "Payments", analytics: "Analytics", features: "Features", settings: "Settings",
   };
 
   return (
@@ -324,7 +348,7 @@ function Dashboard({ wallet, onDisconnect }: { wallet: string; onDisconnect: () 
           <div className="topbar">
             <div className="crumb">GlassBox402 <span className="crumb-sep">/</span> <strong>{titles[view]}</strong></div>
             <div className="topbar-r">
-              <BalanceChip balance={balance} />
+              <BalanceChip balance={balance} wallet={wallet} />
               <span className="net-chip">
                 <span className={"net-dot " + (wsUp ? "live" : "off")} />
                 {wsUp ? "Hub connected" : "Hub offline"}
@@ -341,6 +365,9 @@ function Dashboard({ wallet, onDisconnect }: { wallet: string; onDisconnect: () 
                   recent={myPayments.slice(0, 6)} now={now}
                   onTestBuyer={doTestBuyer} goPayments={() => setView("payments")}
                 />
+              )}
+              {view === "apis" && (
+                <ApisView perApi={perApi} totalIncome={income} wallet={wallet} now={now} onTestBuyer={doTestBuyer} />
               )}
               {view === "payments" && (
                 <Payments payments={myPayments} income={income} now={now} onTestBuyer={doTestBuyer} hasApis={hasApis} />
@@ -376,6 +403,7 @@ function Sidebar(props: {
 }) {
   const items: { id: ViewId; label: string; Icon: any; count?: number }[] = [
     { id: "overview", label: "Overview", Icon: IconOverview },
+    { id: "apis", label: "APIs", Icon: IconApis, count: props.apiCount },
     { id: "payments", label: "Payments", Icon: IconPayments, count: props.paymentCount },
     { id: "analytics", label: "Analytics", Icon: IconAnalytics },
     { id: "features", label: "Features", Icon: IconFeatures },
@@ -409,6 +437,8 @@ function Sidebar(props: {
             <span className="wallet-bal-l">Testnet balance</span>
             <span className="wallet-bal-v">{props.balance == null ? "…" : `${props.balance.toFixed(2)} ℏ`}</span>
           </div>
+          <div className="wallet-verify"><VerifyLink wallet={props.wallet} /></div>
+          <div className="wallet-note">Live on Hedera Testnet · also in MetaMask</div>
           <button className="disconnect" onClick={props.onDisconnect}>Disconnect</button>
         </div>
       </div>
@@ -417,8 +447,9 @@ function Sidebar(props: {
 }
 
 /* Prominent live wallet balance — the money-shot. Pulses green each time it
-   grows as payments settle real HBAR on Hedera testnet. */
-function BalanceChip({ balance }: { balance: number | null }) {
+   grows, and links to the wallet's HashScan account so anyone can verify the
+   balance + every payment on Hedera's public explorer (anti-"staged"). */
+function BalanceChip({ balance, wallet }: { balance: number | null; wallet: string }) {
   const [bumped, setBumped] = useState(false);
   const prev = useRef<number | null>(null);
   useEffect(() => {
@@ -431,11 +462,23 @@ function BalanceChip({ balance }: { balance: number | null }) {
     prev.current = balance;
   }, [balance]);
   return (
-    <span className={"bal-chip" + (bumped ? " bump" : "")} title="Live testnet balance — grows as payments settle on Hedera">
+    <a className={"bal-chip" + (bumped ? " bump" : "")} href={hashscanAccount(wallet)} target="_blank" rel="noreferrer"
+       title="Live testnet balance — verify it and every payment on Hedera's public explorer (HashScan)">
       <IconWallet />
       <b>{balance == null ? "…" : balance.toFixed(2)}</b>
       <span className="hbar">ℏ</span>
-    </span>
+      <IconExternal />
+    </a>
+  );
+}
+
+/* Wallet-level HashScan link — lets judges verify OUTSIDE our UI. */
+function VerifyLink({ wallet, label = "verify on HashScan" }: { wallet: string; label?: string }) {
+  return (
+    <a className="receipt-link" href={hashscanAccount(wallet)} target="_blank" rel="noreferrer"
+       title="your balance and every payment, on Hedera's public explorer">
+      {label} <IconExternal />
+    </a>
   );
 }
 
@@ -466,6 +509,15 @@ function Overview(props: {
           </button>
         )}
       </div>
+
+      {hasApis && (
+        <div className="callout" style={{ marginBottom: 20 }}>
+          <IconInfo />
+          <span>
+            Live on Hedera Testnet — your balance and every payment are public and verifiable. <VerifyLink wallet={props.wallet} /> · also visible in MetaMask (Hedera Testnet network).
+          </span>
+        </div>
+      )}
 
       {hasApis && (
         <div className="hero-stats">
@@ -534,6 +586,87 @@ function ConnectApiCard({ wallet, hero }: { wallet: string; hero: boolean }) {
         </button>
       </div>
       <div className="listen"><span className="pulse-dot" /> Listening for your gateway…&nbsp; the API appears here the moment it comes online.</div>
+    </div>
+  );
+}
+
+/* ============================================================
+   APIS — which APIs you've x402ified, and the income of each
+   ============================================================ */
+function ApisView({ perApi, totalIncome, wallet, now, onTestBuyer }: {
+  perApi: ApiStat[]; totalIncome: number; wallet: string; now: number; onTestBuyer: (l?: Lane) => void;
+}) {
+  if (perApi.length === 0) {
+    return (
+      <section className="view-fade">
+        <div className="page-head"><div>
+          <div className="page-title">Your x402 APIs</div>
+          <div className="page-sub">The APIs you've monetized with x402 — and the income of each.</div>
+        </div></div>
+        <ConnectApiCard wallet={wallet} hero />
+      </section>
+    );
+  }
+  const totalReq = perApi.reduce((s, a) => s + a.requests, 0);
+  return (
+    <section className="view-fade">
+      <div className="page-head">
+        <div>
+          <div className="page-title">Your x402 APIs</div>
+          <div className="page-sub">The APIs you've monetized with x402 — and the income of each.</div>
+        </div>
+        <div className="api-total">
+          <div className="api-total-l">Total income</div>
+          <div className="api-total-v">{usd(totalIncome, 2)}</div>
+          <div className="api-total-s">{perApi.length} API{perApi.length > 1 ? "s" : ""} · {totalReq.toLocaleString()} paid calls</div>
+        </div>
+      </div>
+      <div className="gb-table">
+        <div className="gb-scroll">
+          <div className="gb-row head cols-api">
+            <div>API</div><div>Chain</div><div style={{ textAlign: "right" }}>Price</div>
+            <div style={{ textAlign: "right" }}>Requests</div><div style={{ textAlign: "right" }}>Income</div><div />
+          </div>
+          {perApi.map((a) => <ApiRow key={a.lane.name} a={a} now={now} onTestBuyer={onTestBuyer} />)}
+        </div>
+        <div className="table-foot">
+          <span>{perApi.length} API{perApi.length > 1 ? "s" : ""} · <span className="muted">sorted by income</span></span>
+          <span>Total&nbsp;<span className="tot">{usd(totalIncome, 2)}</span></span>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ApiRow({ a, now, onTestBuyer }: { a: ApiStat; now: number; onTestBuyer: (l?: Lane) => void }) {
+  const { lane } = a;
+  const [busy, setBusy] = useState(false);
+  const test = async () => {
+    setBusy(true);
+    try { await onTestBuyer(lane); } finally { setTimeout(() => setBusy(false), 1000); }
+  };
+  return (
+    <div className="gb-row cols-api">
+      <div className="api-id">
+        <div className="gb-ava" style={{ background: avatarGradient(lane.name) }} />
+        <div className="api-id-meta">
+          <div className="api-name">{lane.name}</div>
+          <div className="api-host mono">{hostOf(lane.upstream)}</div>
+        </div>
+      </div>
+      <div><span className="chain-badge">{lane.chain ?? "hedera"}</span></div>
+      <div className="amt">{usd(lane.price, 4)}</div>
+      <div className="amt">{a.requests.toLocaleString()}</div>
+      <div className="amt income-cell">{usd(a.income, 2)}</div>
+      <div className="api-actions">
+        {a.lastT ? <span className="api-last">{ago(a.lastT, now)}</span> : null}
+        {a.lastHashscan
+          ? <a className="receipt-link" href={a.lastHashscan} target="_blank" rel="noreferrer" title="most recent settlement on Hedera testnet">latest on Hedera <IconExternal /></a>
+          : a.requests === 0 ? <span className="muted" style={{ fontSize: 13 }}>no calls yet</span> : null}
+        <button className="btn btn-secondary btn-sm" disabled={busy} onClick={test}>
+          <IconBolt /> {busy ? "sent" : "test buyer"}
+        </button>
+      </div>
     </div>
   );
 }
@@ -884,10 +1017,10 @@ function Settings({ wallet, balance, onDisconnect }: { wallet: string; balance: 
         <div className="section-title" style={{ marginBottom: 6 }}>Payout</div>
         <div className="set-row">
           <div className="set-k">Settlement wallet<div className="sub">Where settled x402 payments are deposited</div></div>
-          <div className="set-v"><span className="keyfield">{shortAddr(wallet)}</span><button className="disconnect" style={{ width: "auto", marginTop: 0, padding: "6px 12px" }} onClick={onDisconnect}>Disconnect</button></div>
+          <div className="set-v"><span className="keyfield">{shortAddr(wallet)}</span><VerifyLink wallet={wallet} /><button className="disconnect" style={{ width: "auto", marginTop: 0, padding: "6px 12px" }} onClick={onDisconnect}>Disconnect</button></div>
         </div>
         <div className="set-row">
-          <div className="set-k">Testnet balance<div className="sub">Live from the Hedera mirror node</div></div>
+          <div className="set-k">Testnet balance<div className="sub">Live on Hedera Testnet — also visible in MetaMask (Hedera Testnet network)</div></div>
           <div className="set-v"><span className="keyfield">{balance == null ? "…" : `${balance.toFixed(4)} ℏ`}</span></div>
         </div>
         <div className="set-row">
@@ -920,5 +1053,184 @@ function Settings({ wallet, balance, onDisconnect }: { wallet: string; balance: 
         </div>
       </div>
     </section>
+  );
+}
+
+/* ============================================================
+   BUYER PLAYGROUND — the market from the agent's side (?app=buyer)
+   Browse x402 APIs, buy as a verified human or an anonymous bot, and see the
+   REAL upstream response + on-chain Hedera settlement. Proves the loop is real.
+   ============================================================ */
+interface Receipt {
+  id: number; api: string; host: string;
+  tier: "human" | "bot"; price: number;
+  ok: boolean; status: number;
+  value?: string; raw?: string; hashscan?: string; error?: string;
+  t: number;
+}
+
+// Pull the meaningful field out of an upstream response for a clean receipt.
+function extractResponse(body?: string): { value?: string; raw?: string } {
+  if (!body) return {};
+  try {
+    const j = JSON.parse(body);
+    if (j?.data?.amount && j?.data?.currency) {
+      return { value: `${j.data.base ?? ""}${j.data.base ? " " : ""}${j.data.amount} ${j.data.currency}`.trim(), raw: JSON.stringify(j, null, 2) };
+    }
+    const pick = j.value ?? j.message ?? j.joke ?? j.text ?? j.price ?? j.result;
+    if (pick != null && typeof pick !== "object") return { value: String(pick), raw: JSON.stringify(j, null, 2) };
+    return { raw: JSON.stringify(j, null, 2) };
+  } catch {
+    return body.length <= 400 ? { value: body } : { raw: body };
+  }
+}
+
+function BuyerPlayground() {
+  const [lanes, setLanes] = useState<Lane[]>([]);
+  const [policies, setPolicies] = useState<Record<string, Policy>>({});
+  const [receipts, setReceipts] = useState<Receipt[]>([]);
+  const [customUrl, setCustomUrl] = useState("");
+  const [customVerified, setCustomVerified] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [now, setNow] = useState(Date.now());
+  const rid = useRef(1);
+
+  useEffect(() => {
+    let stop = false;
+    const pull = async () => {
+      const ls = await api.lanes().catch(() => []);
+      if (stop) return;
+      setLanes(ls);
+      const entries = await Promise.all(ls.map(async (l) => [l.name, await api.getPolicy(l.name).catch(() => ({}))] as const));
+      if (!stop) setPolicies(Object.fromEntries(entries));
+    };
+    pull();
+    const iv = setInterval(pull, 4000);
+    return () => { stop = true; clearInterval(iv); };
+  }, []);
+  useEffect(() => {
+    const iv = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(iv);
+  }, []);
+
+  const priceFor = (lane: Lane, verified: boolean) => {
+    const pol = policies[lane.name] ?? {};
+    if (verified) return lane.price;
+    return pol.humanVerifiedOnly ? lane.price * (pol.botMultiplier ?? 10) : lane.price;
+  };
+
+  const run = async (opts: { lane?: Lane; url?: string; verified: boolean; key: string; api: string; host: string; price: number }) => {
+    setBusy(opts.key);
+    try {
+      const res = opts.lane ? await buyFromLane(opts.lane, opts.verified) : await buyUrl(opts.url!, opts.verified);
+      const { value, raw } = extractResponse(res.body);
+      setReceipts((r) => [{
+        id: rid.current++, api: opts.api, host: opts.host,
+        tier: opts.verified ? "human" : "bot", price: opts.price,
+        ok: !!res.ok, status: res.status, value, raw, hashscan: res.hashscan, error: res.error,
+        t: Date.now(),
+      }, ...r].slice(0, 20));
+    } finally { setBusy(null); }
+  };
+
+  const buyCustom = (verified: boolean) => {
+    if (!customUrl.trim()) return;
+    run({ url: customUrl.trim(), verified, key: `custom-${verified}`, api: hostOf(customUrl), host: customUrl.trim(), price: 0 });
+  };
+
+  return (
+    <div className="buyer">
+      <div className="buyer-head">
+        <div className="buyer-brand">
+          <div className="gb-mark" />
+          <div>
+            <div className="buyer-title">x402 Buyer Playground</div>
+            <div className="buyer-sub">an agent shopping the x402 market — pay per call, get the data, settle on Hedera</div>
+          </div>
+        </div>
+        <a className="net-chip" href="/" title="Back to the seller dashboard">← Seller dashboard</a>
+      </div>
+
+      <div className="buyer-main">
+        <div>
+          <div className="section-label" style={{ marginBottom: 12 }}>Directory · {lanes.length} API{lanes.length === 1 ? "" : "s"}</div>
+
+          <div className="pay-any">
+            <input className="input mono" placeholder="pay any x402 URL — http://localhost:4090/jokes/random"
+              value={customUrl} spellCheck={false} onChange={(e) => setCustomUrl(e.target.value)} />
+            <label className="pay-any-verified">
+              <label className="switch" style={{ width: 36, height: 22 }}>
+                <input type="checkbox" checked={customVerified} onChange={(e) => setCustomVerified(e.target.checked)} />
+                <span className="slider" />
+              </label>
+              <span>World ID</span>
+            </label>
+            <button className="btn btn-secondary btn-sm" disabled={!customUrl.trim() || busy === `custom-${customVerified}`} onClick={() => buyCustom(customVerified)}>
+              <IconBolt /> Pay
+            </button>
+          </div>
+
+          {lanes.length === 0
+            ? <div className="empty-state">No APIs online yet. Start one with <code>x402ify</code> and it appears here.</div>
+            : lanes.map((lane) => {
+              const humanKey = `${lane.name}-h`, botKey = `${lane.name}-b`;
+              const botPrice = priceFor(lane, false);
+              return (
+                <div className="shop-card" key={lane.name}>
+                  <div className="shop-head">
+                    <div className="gb-ava" style={{ background: avatarGradient(lane.name) }} />
+                    <div className="shop-id">
+                      <div className="shop-name">{lane.name}</div>
+                      <div className="shop-host mono">{hostOf(lane.upstream)}</div>
+                    </div>
+                    <span className="chain-badge">{lane.chain ?? "hedera"}</span>
+                  </div>
+                  <div className="shop-price">Base price <b>{usd(lane.price, 2)}</b> / call</div>
+                  <div className="shop-buttons">
+                    <button className="btn btn-primary btn-sm" disabled={busy === humanKey}
+                      onClick={() => run({ lane, verified: true, key: humanKey, api: lane.name, host: hostOf(lane.upstream), price: priceFor(lane, true) })}>
+                      <IconShield /> {busy === humanKey ? "buying…" : `Buy as verified human · ${usd(lane.price, 2)}`}
+                    </button>
+                    <button className="btn btn-secondary btn-sm" disabled={busy === botKey}
+                      onClick={() => run({ lane, verified: false, key: botKey, api: lane.name, host: hostOf(lane.upstream), price: botPrice })}>
+                      {busy === botKey ? "buying…" : `Buy as anonymous bot · ${usd(botPrice, 2)}`}
+                    </button>
+                  </div>
+                  {botPrice > lane.price && <div className="shop-note">Unverified bots pay {Math.round(botPrice / lane.price)}× — World ID gets the base price.</div>}
+                </div>
+              );
+            })}
+        </div>
+
+        <div>
+          <div className="section-label" style={{ marginBottom: 12 }}>Purchases · {receipts.length}</div>
+          {receipts.length === 0
+            ? <div className="empty-state">Buy from an API to see the real response and its Hedera receipt here.</div>
+            : receipts.map((r) => (
+              <div className={"receipt-card " + (r.ok ? "ok" : "fail")} key={r.id}>
+                <div className="receipt-top">
+                  <span className={"tier-badge " + r.tier}>{r.tier === "human" ? "human ✓ World ID" : "anonymous bot"}</span>
+                  <span className="receipt-api">{r.api}</span>
+                  <span className="spacer" />
+                  {r.price > 0 && <span className="receipt-price mono">{usd(r.price, 2)}</span>}
+                </div>
+                <div className="receipt-body">
+                  {r.ok
+                    ? (r.value
+                      ? <div className="receipt-val">{r.value}</div>
+                      : <pre className="receipt-raw">{r.raw ?? "(no body)"}</pre>)
+                    : <div className="receipt-err">purchase failed{r.error ? `: ${r.error}` : ` (status ${r.status})`}</div>}
+                </div>
+                <div className="receipt-foot">
+                  {r.hashscan
+                    ? <a className="receipt-link" href={r.hashscan} target="_blank" rel="noreferrer">view tx on Hedera <IconExternal /></a>
+                    : <span className="muted" style={{ fontSize: 13 }}>{r.ok ? "settling…" : "not settled"}</span>}
+                  <span className="muted" style={{ fontSize: 13 }}>{ago(r.t, now)}</span>
+                </div>
+              </div>
+            ))}
+        </div>
+      </div>
+    </div>
   );
 }
