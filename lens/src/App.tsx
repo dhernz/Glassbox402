@@ -118,6 +118,7 @@ function Dashboard({ wallet, onDisconnect }: { wallet: string; onDisconnect: () 
   const [payments, setPayments] = useState<Map<string, Payment>>(new Map());
   const [policies, setPolicies] = useState<Map<string, Policy>>(new Map());
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
+  const [hcsTopicUrl, setHcsTopicUrl] = useState(""); // the receipt topic, once the hub opens one
   const [wsUp, setWsUp] = useState(false);
   const [balance, setBalance] = useState<number | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -200,6 +201,19 @@ function Dashboard({ wallet, onDisconnect }: { wallet: string; onDisconnect: () 
       return;
     }
 
+    // the HCS receipt arrives after the settlement — a second, independent link
+    if (ev.type === "hcs_receipt") {
+      const hcsUrl = String(ev.data.hashscan ?? "");
+      const hcsTopicUrl = String(ev.data.topicUrl ?? "");
+      setHcsTopicUrl((prev) => prev || hcsTopicUrl);
+      setPayments((prev) => {
+        const p = prev.get(ev.reqId);
+        if (!p) return prev;
+        return new Map(prev).set(ev.reqId, { ...p, hcsUrl, hcsTopicUrl });
+      });
+      return;
+    }
+
     if (ev.type === "settled" || ev.type === "verify_fail") {
       const p: Payment = {
         reqId: ev.reqId,
@@ -247,12 +261,17 @@ function Dashboard({ wallet, onDisconnect }: { wallet: string; onDisconnect: () 
     return () => { closed = true; ws?.close(); };
   }, [handle]);
 
-  /* ---- initial fetch + polling: lanes, analytics ---- */
+  /* ---- initial fetch + polling: lanes, analytics, the receipt topic ---- */
   useEffect(() => {
     let stop = false;
     const pull = async () => {
-      const [ls, an] = await Promise.all([api.lanes().catch(() => []), api.analytics().catch(() => null)]);
+      const [ls, an, st] = await Promise.all([
+        api.lanes().catch(() => []),
+        api.analytics().catch(() => null),
+        api.status().catch(() => null),
+      ]);
       if (stop) return;
+      if (st?.hcsTopicUrl) setHcsTopicUrl(st.hcsTopicUrl);
       if (ls.length) {
         setLanes((prev) => {
           const next = new Map(prev);
@@ -372,7 +391,7 @@ function Dashboard({ wallet, onDisconnect }: { wallet: string; onDisconnect: () 
                 <ApisView perApi={perApi} totalIncome={income} wallet={wallet} now={now} onTestBuyer={doTestBuyer} />
               )}
               {view === "payments" && (
-                <Payments payments={myPayments} income={income} now={now} onTestBuyer={doTestBuyer} hasApis={hasApis} />
+                <Payments payments={myPayments} income={income} now={now} onTestBuyer={doTestBuyer} hasApis={hasApis} hcsTopicUrl={hcsTopicUrl} />
               )}
               {view === "analytics" && <AnalyticsView a={analytics} />}
               {view === "features" && (
@@ -677,7 +696,7 @@ function ApiRow({ a, now, onTestBuyer }: { a: ApiStat; now: number; onTestBuyer:
    PAYMENTS
    ============================================================ */
 type PayFilter = "all" | "settled" | "failed" | "bot";
-function Payments(props: { payments: Payment[]; income: number; now: number; onTestBuyer: () => void; hasApis: boolean }) {
+function Payments(props: { payments: Payment[]; income: number; now: number; onTestBuyer: () => void; hasApis: boolean; hcsTopicUrl: string }) {
   const [filter, setFilter] = useState<PayFilter>("all");
   const counts = useMemo(() => ({
     all: props.payments.length,
@@ -694,7 +713,13 @@ function Payments(props: { payments: Payment[]; income: number; now: number; onT
       <div className="page-head">
         <div>
           <div className="page-title">Payments</div>
-          <div className="page-sub">Every x402 settlement, with its on-chain receipt on Hedera.</div>
+          <div className="page-sub">
+            Every x402 settlement, with its on-chain receipt on Hedera.
+            {props.hcsTopicUrl && <>
+              {" "}Audit them all on the{" "}
+              <a className="receipt-link" href={props.hcsTopicUrl} target="_blank" rel="noreferrer">HCS receipt topic <IconExternal /></a>
+            </>}
+          </div>
         </div>
         {props.hasApis && (
           <button className="btn btn-secondary btn-sm" onClick={props.onTestBuyer}><IconExport /> Send test payment</button>
@@ -756,7 +781,11 @@ function PaymentRow({ p, now }: { p: Payment & { fresh?: boolean }; now: number 
         {p.status === "failed"
           ? <span className="receipt-none">{(p.reason ?? "rejected").replaceAll("_", " ")}</span>
           : p.hashscan
-            ? <a className="receipt-link" href={p.hashscan} target="_blank" rel="noreferrer" title="settled on Hedera testnet">view on Hedera <IconExternal /></a>
+            ? <>
+                <a className="receipt-link" href={p.hashscan} target="_blank" rel="noreferrer" title="settled on Hedera testnet">view on Hedera <IconExternal /></a>
+                {/* the money moved (above) vs. what it bought (below, on HCS) */}
+                {p.hcsUrl && <a className="receipt-link hcs" href={p.hcsUrl} target="_blank" rel="noreferrer" title="this payment's receipt on the HCS topic">receipt <IconExternal /></a>}
+              </>
             : <span className="receipt-pending"><span className="pulse-dot" />settling…</span>}
       </div>
       <div className="gb-time">{ago(p.t, now)}</div>
@@ -1068,6 +1097,8 @@ interface Receipt {
   tier: "human" | "bot"; price: number;
   ok: boolean; status: number;
   value?: string; raw?: string; hashscan?: string; error?: string;
+  txHash?: string; // matched against the hcs_receipt event to attach hcsUrl
+  hcsUrl?: string; // this purchase's receipt on the HCS topic (arrives ~5s later)
   t: number;
 }
 
@@ -1110,10 +1141,18 @@ function extractResponse(body?: string): { value?: string; raw?: string } {
   if (j?.data?.amount && j?.data?.currency) {
     return { value: `${j.data.base ?? ""}${j.data.base ? " " : ""}${j.data.amount} ${j.data.currency}`.trim() };
   }
-  const pick = j.value ?? j.message ?? j.joke ?? j.text ?? j.price ?? j.result;
-  if (pick != null && typeof pick !== "object") return { value: String(pick) };
-  // GraphQL / nested object → compact summary, with the full JSON in the <pre>
-  const summary = summarizeData(j?.data ?? j);
+  // Prefer the actual payload over status chatter: Etherscan-shaped responses put
+  // "OK" in `message` and the data in `result`, so picking `message` first would
+  // show the buyer a status word instead of what they paid for.
+  const payload = j.result ?? j.data;
+  if (payload != null && typeof payload === "object") {
+    const summary = summarizeData(payload);
+    return summary ? { value: summary, raw } : { raw };
+  }
+  const pick = j.value ?? j.joke ?? j.text ?? j.price ?? payload ?? j.message;
+  if (pick != null && typeof pick !== "object") return { value: String(pick), raw };
+  // Anything else (e.g. Alpha Vantage's "Global Quote") → summarize the whole body
+  const summary = summarizeData(j);
   return summary ? { value: summary, raw } : { raw };
 }
 
@@ -1123,6 +1162,7 @@ function BuyerPlayground() {
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [customUrl, setCustomUrl] = useState("");
   const [customVerified, setCustomVerified] = useState(false);
+  const [topicUrl, setTopicUrl] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
   const rid = useRef(1);
@@ -1133,6 +1173,9 @@ function BuyerPlayground() {
       const ls = await api.lanes().catch(() => []);
       if (stop) return;
       setLanes(ls);
+      // show the topic link from a cold start, not only after the first buy
+      const st = await api.status().catch(() => null);
+      if (!stop && st?.hcsTopicUrl) setTopicUrl(st.hcsTopicUrl);
       const entries = await Promise.all(ls.map(async (l) => [l.name, await api.getPolicy(l.name).catch(() => ({}))] as const));
       if (!stop) setPolicies(Object.fromEntries(entries));
     };
@@ -1143,6 +1186,31 @@ function BuyerPlayground() {
   useEffect(() => {
     const iv = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(iv);
+  }, []);
+
+  // The HCS receipt is written after the purchase returns, so it arrives on the
+  // event stream a few seconds later and attaches itself to the matching card.
+  useEffect(() => {
+    let ws: WebSocket | null = null;
+    let closed = false;
+    const openWs = () => {
+      ws = new WebSocket(HUB_WS);
+      ws.onclose = () => { if (!closed) setTimeout(openWs, 1200); };
+      ws.onerror = () => ws?.close();
+      ws.onmessage = (m) => {
+        try {
+          const ev = JSON.parse(m.data);
+          if (ev.type !== "hcs_receipt") return;
+          const tx = String(ev.data.tx ?? "");
+          const hcsUrl = String(ev.data.hashscan ?? "");
+          setTopicUrl((prev) => prev || String(ev.data.topicUrl ?? ""));
+          if (!tx || !hcsUrl) return;
+          setReceipts((rs) => rs.map((r) => (r.txHash === tx ? { ...r, hcsUrl } : r)));
+        } catch {}
+      };
+    };
+    openWs();
+    return () => { closed = true; ws?.close(); };
   }, []);
 
   const priceFor = (lane: Lane, verified: boolean) => {
@@ -1158,8 +1226,9 @@ function BuyerPlayground() {
       const { value, raw } = extractResponse(res.body);
       setReceipts((r) => [{
         id: rid.current++, api: opts.api, host: opts.host,
-        tier: opts.verified ? "human" : "bot", price: opts.price,
+        tier: (opts.verified ? "human" : "bot") as Receipt["tier"], price: opts.price,
         ok: !!res.ok, status: res.status, value, raw, hashscan: res.hashscan, error: res.error,
+        txHash: res.txHash,
         t: Date.now(),
       }, ...r].slice(0, 20));
     } finally { setBusy(null); }
@@ -1235,7 +1304,13 @@ function BuyerPlayground() {
         </div>
 
         <div>
-          <div className="section-label" style={{ marginBottom: 12 }}>Purchases · {receipts.length}</div>
+          <div className="section-label" style={{ marginBottom: 12 }}>
+            Purchases · {receipts.length}
+            {topicUrl && <>
+              {" · "}
+              <a className="receipt-link" href={topicUrl} target="_blank" rel="noreferrer">HCS receipt topic <IconExternal /></a>
+            </>}
+          </div>
           {receipts.length === 0
             ? <div className="empty-state">Buy from an API to see the real response and its Hedera receipt here.</div>
             : receipts.map((r) => (
@@ -1256,9 +1331,12 @@ function BuyerPlayground() {
                     : <div className="receipt-err">purchase failed{r.error ? `: ${r.error}` : ` (status ${r.status})`}</div>}
                 </div>
                 <div className="receipt-foot">
-                  {r.hashscan
-                    ? <a className="receipt-link" href={r.hashscan} target="_blank" rel="noreferrer">view tx on Hedera <IconExternal /></a>
-                    : <span className="muted" style={{ fontSize: 13 }}>{r.ok ? "settling…" : "not settled"}</span>}
+                  <span>
+                    {r.hashscan
+                      ? <a className="receipt-link" href={r.hashscan} target="_blank" rel="noreferrer">view tx on Hedera <IconExternal /></a>
+                      : <span className="muted" style={{ fontSize: 13 }}>{r.ok ? "settling…" : "not settled"}</span>}
+                    {r.hcsUrl && <a className="receipt-link hcs" href={r.hcsUrl} target="_blank" rel="noreferrer" title="this purchase's receipt on the HCS topic">receipt <IconExternal /></a>}
+                  </span>
                   <span className="muted" style={{ fontSize: 13 }}>{ago(r.t, now)}</span>
                 </div>
               </div>

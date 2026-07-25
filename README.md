@@ -86,7 +86,7 @@ GlassBox402 monetizes as the control tower on top: a small take rate on settled 
 - **Account lazy-create from a MetaMask address** — a judge connects a fresh `0x` EVM address; the first payment lazy-creates the matching Hedera account, resolvable on the mirror node.
 - **HashScan explorer links** — each settlement decodes to a real transaction id with a public HashScan link, so nothing in the UI has to be trusted.
 - **Mirror node** — used to resolve EVM addresses to Hedera accounts and read on-chain balances.
-- **Hedera Consensus Service (HCS)** — receipts can be written to an HCS topic as a permanent, ordered record of payments (`core/src/hedera.ts`).
+- **Hedera Consensus Service (HCS)** — every settled payment writes a receipt to a public HCS topic (`core/src/hub.ts` → `core/src/hedera.ts`): which lane, which buyer, which price, and the settlement transaction it belongs to. The transaction proves the money moved; the topic proves what it was *for*. That means the dashboard's income numbers are auditable against Hedera rather than trusted — read the topic straight off the mirror node and it has to agree with the UI.
 
 ## Network impact for Hedera
 

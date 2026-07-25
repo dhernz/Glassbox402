@@ -52,9 +52,12 @@ npx x402ify https://api.etherscan.io/v2/api --price 0.01 --wallet 0xYourWallet \
 The new API **flashes into the dashboard** the moment it registers.
 
 **3. An agent buys it — 30s.**
-Switch to the **buyer playground**. *"Now the other side. This is an agent shopping the x402 market — it discovered these APIs, no signup anywhere."* Click **buy as anonymous bot** on Etherscan.
-It shows: the price charged, the **real upstream response** (live ETH price), and a **HashScan link**.
+Switch to the **buyer playground** (`http://localhost:5173?app=buyer`). *"Now the other side. This is an agent shopping the x402 market — it discovered these APIs, no signup anywhere."* Click **buy as anonymous bot** on Etherscan.
+It shows: the price charged, the **real upstream response** (live ETH price), and a **HashScan link**. A few seconds later a second **receipt** link appears on the same card — that's the HCS receipt landing. Let it appear rather than talking over it.
 *"Real data, real payment. And that link isn't ours."* Open the HashScan tx. *"That's Hedera testnet. Nothing on my dashboard has to be trusted — it all resolves on-chain."*
+
+Then, on **Payments**, open the **HCS receipt topic** link in the header.
+*"And this is the audit trail. Every payment my dashboard counts also writes a receipt to a Hedera consensus topic — the lane, the buyer, the price, ordered and timestamped by the network. The transaction proves the money moved; this proves what it was for. So when I tell you what I earned, you don't have to take my dashboard's word for it — the numbers are Hedera's, not mine."*
 
 **4. The World beat: humans and bots pay different prices — 25s.**
 Back on the seller: **Features** → toggle **Require human-verified callers**. *"As the operator I decide who my customers are. Prove you're a unique human with World ID, you pay my base price. Anonymous bot? 10×."*
@@ -74,7 +77,7 @@ It calls `list_paid_apis`, finds the subgraph, calls `paid_fetch` — and **the 
 
 ## Per-partner pitches
 
-**Hedera — AI & Agentic Payments.** Every payment settles on Hedera testnet through the **blocky402 facilitator** (the textbook Hedera x402 flow — no private key on the resource server). Real HBAR moves to the operator's payout account; each settlement decodes to a **real transaction with a public HashScan link**; HCS receipts give a permanent ordered record (`core/src/hedera.ts`). Network impact: a judge connects a **fresh MetaMask `0x` address and their Hedera account is lazy-created by their first payment** — every EVM-native operator we onboard is a new Hedera account plus a stream of settled txs. Validation: **four real APIs driven end to end**, evidence in [VALIDATION.md](./VALIDATION.md).
+**Hedera — AI & Agentic Payments.** Every payment settles on Hedera testnet through the **blocky402 facilitator** (the textbook Hedera x402 flow — no private key on the resource server). Real HBAR moves to the operator's payout account; each settlement decodes to a **real transaction with a public HashScan link**. **Two Hedera services, not one**: the transfer moves the value, and **HCS** records what it bought — every settled payment writes a receipt message to a public topic (`core/src/hub.ts` → `core/src/hedera.ts`), so the dashboard's income is auditable off the mirror node instead of trusted. Network impact: a judge connects a **fresh MetaMask `0x` address and their Hedera account is lazy-created by their first payment** — every EVM-native operator we onboard is a new Hedera account plus a stream of settled txs. Validation: **four real APIs driven end to end**, evidence in [VALIDATION.md](./VALIDATION.md).
 
 **World — human-verified pricing.** Access and price based on human-backed verification: World ID holders get base price, unverified bots pay a multiplier or are blocked entirely. It's a per-API operator toggle in **Features**, not a bolt-on — and it demos as two buttons with two different prices on the same endpoint.
 
@@ -87,10 +90,16 @@ Three answers, in order:
 1. **Open the HashScan tx** from any payment card. Public explorer, not our UI.
 2. **Open the payout account** on HashScan — https://hashscan.io/testnet/account/0x2403506eddcd48207ee982d7a8f86901365192ed — every payment, accumulating.
 3. **Switch MetaMask to Hedera Testnet** (chainId 296): the same `0x` address shows the HBAR balance growing per payment.
+4. **Read the receipt topic off the mirror node**, bypassing our code entirely — the messages have to match the payments table row for row:
+   ```bash
+   curl -s "https://testnet.mirrornode.hedera.com/api/v1/topics/<TOPIC_ID>/messages" \
+     | python3 -c "import sys,json,base64;[print(base64.b64decode(m['message']).decode()) for m in json.load(sys.stdin)['messages']]"
+   ```
+   The topic id is printed by the hub at startup and linked in the **Payments** header.
 
 ## What's real vs not (be honest at the booth)
 
-- ✅ **Real:** `x402ify` (published, v0.3.0 on npm), the protocol layer (official `@x402` packages), Hedera settlement via blocky402 with HashScan txs, all four upstream APIs returning real data, the dashboard/analytics/income, human-vs-bot pricing tiers, the **MCP server** (an agent pays with the same x402 client — verified against both a REST lane and the GraphQL subgraph, real txs).
+- ✅ **Real:** `x402ify` (published, v0.3.0 on npm), the protocol layer (official `@x402` packages), Hedera settlement via blocky402 with HashScan txs, **HCS receipts** (one topic message per settled payment, readable off the public mirror node), all four upstream APIs returning real data, the dashboard/analytics/income, human-vs-bot pricing tiers, the **MCP server** (an agent pays with the same x402 client — verified against both a REST lane and the GraphQL subgraph, real txs).
 - 🟡 **Demo-grade:** World ID verification runs in demo-verify mode locally (real verification path is wired in `core/src/world.ts`); analytics **country** data is seeded with labeled synthetic origins because localhost has no real remote IPs.
 - ❌ **Not in this build:** mainnet, streaming payments (a toggle in Features, roadmap).
 

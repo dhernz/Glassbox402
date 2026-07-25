@@ -443,6 +443,10 @@ code { background: var(--bg-inset); color: var(--text-secondary); padding: 3px 8
 }
 .receipt-link:hover { text-decoration: underline; }
 .receipt-link svg { width: 12px; height: 12px; }
+/* the HCS receipt sits beside the settlement link — quieter, it's the audit
+   trail rather than the money */
+.receipt-link.hcs { margin-left: 10px; color: var(--text-tertiary); font-weight: 400; }
+.receipt-link.hcs:hover { color: var(--accent); }
 .receipt-pending { font-size: 13px; color: var(--text-tertiary); display: inline-flex; align-items: center; gap: 6px; }
 .receipt-none { font-size: 13px; color: var(--text-tertiary); }
 

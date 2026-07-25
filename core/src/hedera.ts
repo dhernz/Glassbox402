@@ -36,6 +36,13 @@ export function initHedera(): Client {
 
 export async function ensureTopic(): Promise<string> {
   if (topicId) return topicId;
+  // A restart would otherwise open a fresh topic and lose the receipt history —
+  // set HEDERA_TOPIC_ID in .env to keep one durable topic across runs.
+  if (process.env.HEDERA_TOPIC_ID) {
+    topicId = process.env.HEDERA_TOPIC_ID;
+    console.log(`🪵 HCS receipt topic ${topicId} (from HEDERA_TOPIC_ID)  https://hashscan.io/testnet/topic/${topicId}`);
+    return topicId;
+  }
   const c = initHedera();
   const tx = await new TopicCreateTransaction()
     .setTopicMemo("GlassBox402 x402 receipts")
@@ -43,6 +50,7 @@ export async function ensureTopic(): Promise<string> {
   const receipt = await tx.getReceipt(c);
   topicId = receipt.topicId!.toString();
   console.log(`🪵 HCS receipt topic ${topicId}  https://hashscan.io/testnet/topic/${topicId}`);
+  console.log(`   ↳ add HEDERA_TOPIC_ID=${topicId} to .env to keep this topic across restarts`);
   return topicId;
 }
 

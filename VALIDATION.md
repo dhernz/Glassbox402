@@ -36,6 +36,28 @@ Payments accumulate in the operator's payout account, viewable independently of 
 
 - **Operator payout account** → https://hashscan.io/testnet/account/0x2403506eddcd48207ee982d7a8f86901365192ed
 
+## The receipts are auditable, not just the transfers
+
+Each settled payment also writes a message to a **Hedera Consensus Service topic** — consensus-ordered and timestamped by the network — recording what the transfer was *for*. A sample topic from a validation run:
+
+- **Receipt topic** → https://hashscan.io/testnet/topic/0.0.9748512
+
+```
+seq 1 | {"glassbox":"x402-settlement","lane":"etherscan","from":"0.0.9695971","amount":0.01,
+         "payTo":"0x2403…92ed","path":"/","tier":"anon","tx":"0.0.7162784@1785002106.167216477"}
+seq 2 | {"glassbox":"x402-settlement","lane":"uniswap-data","from":"0.0.9695971","amount":0.02,
+         "payTo":"0x2403…92ed","path":"/","tier":"anon","tx":"0.0.7162784@1785002171.641911172"}
+```
+
+Read straight from Hedera's public mirror node, with none of our code in the loop:
+
+```bash
+curl -s "https://testnet.mirrornode.hedera.com/api/v1/topics/0.0.9748512/messages" \
+  | python3 -c "import sys,json,base64;[print(base64.b64decode(m['message']).decode()) for m in json.load(sys.stdin)['messages']]"
+```
+
+Each `tx` field ties the receipt back to the settlement transaction above it, so the dashboard's income figures can be reconciled against Hedera line by line. The hub prints the topic id at startup and the dashboard links it from the **Payments** header. Receipts are written fire-and-forget: an operator with no Hedera credentials still serves and settles payments exactly as before, without receipts.
+
 Because payments settle to the connected wallet's real Hedera account (lazy-created from its EVM address), a judge can also switch MetaMask to the Hedera Testnet network and watch the same address's HBAR balance grow per payment. Nothing in the dashboard has to be trusted — it all resolves to Hedera.
 
 ## How to reproduce

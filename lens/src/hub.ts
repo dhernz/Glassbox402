@@ -83,7 +83,9 @@ export interface Payment {
   status: "settled" | "failed";
   reason?: string;
   txHash?: string;
-  hashscan?: string; // real Hedera testnet receipt link (from hedera_receipt)
+  hashscan?: string; // the settlement transaction on HashScan (from hedera_receipt)
+  hcsUrl?: string; // the HCS receipt message for this payment (from hcs_receipt)
+  hcsTopicUrl?: string; // the topic holding every receipt
   t: number;
 }
 
@@ -139,6 +141,9 @@ async function jget<T>(path: string): Promise<T> {
 export const api = {
   lanes: () => jget<{ lanes: Lane[] }>("/lanes").then((r) => r.lanes),
   analytics: () => jget<Analytics>("/analytics"),
+  // the receipt topic exists before any payment does, so the link can be shown
+  // from a cold start rather than only after the first settlement
+  status: () => jget<{ hcsTopic: string | null; hcsTopicUrl: string | null }>("/"),
   getPolicy: (lane: string) => jget<{ policy: Policy }>(`/policy/${encodeURIComponent(lane)}`).then((r) => r.policy ?? {}),
   setPolicy: async (lane: string, patch: Partial<Policy>) => {
     const r = await fetch(`${HUB}/policy/${encodeURIComponent(lane)}`, {

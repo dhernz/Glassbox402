@@ -13,7 +13,8 @@ export type GBEventType =
   | "verify_fail" // rejected (reason in data.reason) — never reaches any chain
   | "settled" // funds moved, data.txHash
   | "response_out" // upstream response forwarded to the buyer
-  | "hedera_receipt" // real HCS receipt of this payment on Hedera testnet (data.hashscan)
+  | "hedera_receipt" // the settlement transaction itself, on HashScan (data.hashscan)
+  | "hcs_receipt" // an HCS topic message recording this payment (data.topicId, data.hashscan)
   | "feed_tick" // hero: a paid data update — { source, value, unit, paid, wallet, balance }
   | "feed_frozen" // hero: the feed stopped because the wallet is empty — { wallet }
   | "signal" // the watcher acted on purchased data

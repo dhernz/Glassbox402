@@ -2,6 +2,8 @@
 //   - broadcasts GBEvents to the Lens over websocket (:4021)
 //   - plays sim facilitator: wallet balances, faucet, settle
 //   - records every event to the tape (JSONL)
+//   - writes an HCS receipt per settled payment (the dashboard's numbers,
+//     independently checkable on Hedera — see receiptFor below)
 //   - `--replay <file.tape.jsonl>` streams a recorded session at original timing
 //     (demo insurance: if the venue wifi dies, the tape still plays)
 
@@ -9,8 +11,14 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { createConnection } from "node:net";
 import { appendFileSync, readFileSync } from "node:fs";
 import { WebSocketServer, WebSocket } from "ws";
-import { HUB_PORT, type GBEvent } from "./events.js";
+import { loadEnv } from "./env.js";
+import { HUB_PORT, gbe, type GBEvent } from "./events.js";
 import { Analytics } from "./analytics.js";
+import { hederaEnabled, ensureTopic, hederaReceipt } from "./hedera.js";
+
+// ./hedera.js reads the operator credentials lazily, inside its functions, so
+// loading them here — after the hoisted imports have run — is early enough.
+loadEnv();
 
 const args = process.argv.slice(2);
 const replayFile = args.includes("--replay") ? args[args.indexOf("--replay") + 1] : null;
@@ -27,9 +35,47 @@ const wss = new WebSocketServer({ noServer: true });
 
 const analytics = new Analytics();
 
+// Every settled payment also gets an HCS receipt: one message on a public
+// Hedera topic, consensus-ordered and timestamped by the network. The x402
+// transaction proves the money moved; this proves what it was FOR — which lane,
+// which buyer, which price — so the dashboard's income numbers can be audited
+// against Hedera instead of trusted. Strictly fire-and-forget: if the operator
+// has no Hedera credentials, or the network is slow, payments and the dashboard
+// behave exactly as they did before.
+let hcsTopic: string | null = null;
+
+async function receiptFor(ev: GBEvent) {
+  if (!hederaEnabled() || replayFile) return;
+  try {
+    const topic = await ensureTopic();
+    hcsTopic = topic;
+    const r = await hederaReceipt(JSON.stringify({
+      glassbox: "x402-settlement",
+      lane: ev.lane,
+      from: ev.data.from,
+      amount: ev.data.amount,
+      payTo: ev.data.payTo,
+      path: ev.data.path,
+      tier: ev.data.tier,
+      tx: ev.data.txHash, // ties the receipt back to the settlement transaction
+      t: ev.t,
+    }));
+    broadcast(gbe("hcs_receipt", ev.lane, ev.reqId, {
+      topicId: topic,
+      hashscan: r.hashscan,
+      topicUrl: `https://hashscan.io/testnet/topic/${topic}`,
+      // the buyer playground has no reqId (it buys over HTTP, not the event
+      // stream), so it matches its purchases to receipts by settlement tx
+      tx: ev.data.txHash,
+    }));
+  } catch (e) {
+    console.error("hcs receipt failed:", String(e).split("\n")[0]);
+  }
+}
+
 function broadcast(ev: GBEvent, record = true) {
   if (ev.type === "lane_up") lanes.set(ev.lane, { name: ev.lane, ...ev.data });
-  if (ev.type === "settled") analytics.ingest(ev.data as any);
+  if (ev.type === "settled") { analytics.ingest(ev.data as any); void receiptFor(ev); }
   ring.push(ev);
   if (ring.length > RING_MAX) ring.shift();
   if (record && !replayFile) {
@@ -65,6 +111,11 @@ const CORS = {
   "access-control-allow-origin": "*",
   "access-control-allow-methods": "GET,POST,OPTIONS",
   "access-control-allow-headers": "content-type",
+  // The dashboard can be served from a public origin (Vercel) while the hub runs
+  // on the operator's own machine. Chrome's Private Network Access sends a
+  // preflight for public→localhost and needs this header, or every /lanes,
+  // /analytics and /testbuyer call from the deployed page is blocked.
+  "access-control-allow-private-network": "true",
 };
 function json(res: ServerResponse, code: number, body: unknown) {
   res.writeHead(code, { "content-type": "application/json", ...CORS });
@@ -151,7 +202,10 @@ const server = createServer(async (req, res) => {
         earnings: Object.fromEntries(earnings),
       });
     }
-    return json(res, 200, { ok: true, service: "glassbox-hub", mode: replayFile ? "replay" : "live" });
+    return json(res, 200, {
+      ok: true, service: "glassbox-hub", mode: replayFile ? "replay" : "live",
+      hcsTopic, hcsTopicUrl: hcsTopic ? `https://hashscan.io/testnet/topic/${hcsTopic}` : null,
+    });
   } catch (e) {
     return json(res, 500, { ok: false, error: String(e) });
   }
@@ -167,6 +221,14 @@ server.on("upgrade", (req, socket, head) => {
 server.listen(HUB_PORT, () => {
   console.log(`⚡ glassbox hub on :${HUB_PORT}  (tape: ${replayFile ? `REPLAY ${replayFile}` : tapeFile})`);
   if (replayFile) startReplay(replayFile);
+  // Open the receipt topic now, so the first payment of the demo isn't the one
+  // paying for topic creation.
+  if (hederaEnabled() && !replayFile) {
+    ensureTopic().then((t) => { hcsTopic = t; }).catch((e) =>
+      console.error("hcs topic unavailable — receipts disabled:", String(e).split("\n")[0]));
+  } else if (!replayFile) {
+    console.log("🪵 no HEDERA_ACCOUNT_ID/HEDERA_PRIVATE_KEY — HCS receipts off");
+  }
 });
 
 function startReplay(file: string) {

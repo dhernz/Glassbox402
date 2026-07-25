@@ -3,3 +3,4 @@ dist/
 *.tape.jsonl
 tape.jsonl
 .env
+.gstack/
