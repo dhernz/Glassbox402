@@ -1,77 +1,79 @@
 # GlassBox402
 
-> **Stripe made card payments one snippet and a dashboard.**
-> **GlassBox402 does the same for machine payments: x402 in one command, with a screen.**
+> **Google Analytics for x402.** Wrap any API in one command, then watch it earn on Hedera.
 
-The agent economy already runs on [x402](https://x402.org), with 100M+ machine payments in six months. But it stays invisible: payments are base64 blobs in HTTP headers, and every failed payment never even reaches a block explorer. Sellers cannot see their API earning, and developers debug blind. GlassBox402 makes any API machine payable in one command, and gives you a live screen to watch, hear, and replay every payment.
+The agent economy runs on [x402](https://x402.org): APIs that charge AI agents tiny per-request payments in crypto, with no accounts and no API keys. GlassBox402 is two things:
 
-Built at **ETHGlobal Lisbon 2026**.
+1. **[`x402ify`](https://www.npmjs.com/package/x402ify)** (published on npm) a single command that wraps ANY API with x402 pay-per-call.
+2. **The dashboard** the control tower where you connect your wallet, see which APIs you have x402ified, track the income of each, view analytics, and add features like human-verified pricing.
 
-## One command turns any API into a business
+Built at ETHGlobal Lisbon 2026.
+
+## Wrap any API in one command
 
 ```bash
-npx x402ify https://api.coingecko.com --price 0.01 --name coingecko
+npx x402ify https://api.chucknorris.io --price 0.01 --wallet 0xYourWallet --sample /jokes/random
 ```
 
-That API now charges machines a cent per call, settles on **Hedera testnet**, and streams every payment to the Lens.
+That API now charges callers per request over the x402 protocol, settled on Hedera. No code, and no private key on the server: the facilitator and the caller's wallet do the signing. Add `--hub http://localhost:4021` to stream every payment into your GlassBox402 dashboard.
 
-## The Lens shows consequence, not mechanism
+`x402ify` is chain-agnostic. Pick where it settles with `--chain hedera | base | base-sepolia | solana`.
 
-The hero of the screen is a machine's wallet draining in real cents as it buys a live data feed. When the wallet hits zero, the feed freezes on screen. Top it up and it comes back to life. The data lives only as long as the machine keeps paying. That is x402, made visceral.
+## The dashboard (the product)
 
-## What is real
+Connect your wallet with MetaMask and you get a live control tower for your x402 APIs:
 
-| Piece | Status |
-|---|---|
-| One command x402 gateway (`x402ify`) | done, any URL, per call pricing |
-| The Lens, a live payment screen | done, consequence view plus replay |
-| **The Graph**, pay per query Uniswap v3 subgraph | done, real gateway, keyless for the buyer |
-| **Hedera**, settlement plus HCS receipts | done, real testnet tx, HashScan links |
-| **MCP server**, any AI agent becomes a paying customer | done, `list_paid_apis` plus `paid_fetch` |
-| Watcher bot, an agent that pays per look | done, real APIs, real spend |
+- **APIs** which APIs you have x402ified, and the income of each.
+- **Overview** total income, request count, and your live HBAR balance growing on-chain.
+- **Payments** every payment as it settles, each with a real HashScan receipt link.
+- **Analytics** calls by endpoint, by hour, by country, and by payer.
+- **Features** require human-verified callers (World ID) so bots pay more, or stream payments.
 
-## Run it
+Everything is scoped to your connected wallet. Payments settle to that wallet on Hedera testnet and the balance grows on-chain, verifiable on HashScan. Connect a fresh MetaMask address and the first payment lazy-creates your Hedera account automatically.
+
+## How it works
+
+```
+your API  ->  x402ify (wrap)  ->  @x402 paymentMiddleware  ->  blocky402 facilitator  ->  Hedera testnet
+                   |
+                   +-- events -->  GlassBox402 hub  -->  the dashboard (live + analytics)
+```
+
+- The convert layer is the standard `@x402` packages, so the protocol is chain-agnostic.
+- Settlement runs through Hedera's blocky402 facilitator, the textbook Hedera x402 flow (the same one Hedera's own example uses).
+- x402ify streams every hop to the hub, which the dashboard renders live and aggregates into analytics.
+
+## Partners
+
+- **Hedera** every payment settles and is receipted on Hedera testnet, with real transactions and HashScan links.
+- **World** human-verified pricing: callers who prove they are a real human (World ID) pay the base price, anonymous bots pay more.
+- **The Graph** a monetized Graph subgraph as one of the demo APIs (pay-per-query on-chain data).
+
+## Run it locally
 
 ```bash
 pnpm install
-cp .env.example .env   # add your testnet keys
-./demo.sh              # gateway lanes plus Lens at http://localhost:5173
+cp .env.example .env    # add your Hedera testnet operator account (signs the demo buyer's payments)
 
-# other terminals:
-GRAPHQL_LANE=http://localhost:4032/ pnpm watcher   # the watcher goes to work
-pnpm broke                                          # a broke agent, payments fail visibly
+# terminal 1 - the hub + the dashboard
+pnpm --filter @glassbox/core exec tsx src/hub.ts
+pnpm --filter @glassbox/lens dev                 # http://localhost:5173
+
+# terminal 2 - wrap any API and stream it into the dashboard
+npx x402ify https://api.coinbase.com --price 0.01 \
+  --wallet 0xYourWallet --sample /v2/prices/ETH-USD/spot --hub http://localhost:4021
 ```
 
-## Let an AI pay for its own data (MCP)
+Open the dashboard, connect your wallet, and click "send test buyer" to drive a real payment.
 
-Add to your MCP client (`.mcp.json` included):
-
-```json
-{ "mcpServers": { "glassbox402": {
-  "command": "pnpm", "args": ["--dir","glassbox402/core","exec","tsx","src/mcp.ts"] } } }
-```
-
-Then ask your agent "what's the ETH price? use glassbox402" and it discovers the lanes, pays a cent, and the payment lands on the Lens mid answer.
-
-## Architecture
+## Repo layout
 
 ```
-core/src/x402ify.ts    the one command, x402 paywall proxy for any URL
-core/src/hub.ts        event broadcaster (ws :4021) plus facilitator plus tape
-core/src/hedera.ts     real settlement plus HCS receipts on Hedera testnet
-core/src/mcp.ts        MCP server, any AI agent pays for data
-core/src/watcher.ts    demo buyer, a watcher with a wallet
-lens/                  the screen, consequence hero, sound, replay
+packages/x402ify/   the published npm package (wrap any API)
+core/               the hub (events, analytics, facilitator glue) and the gateway
+lens/               the dashboard (React + the functor design system)
 ```
 
-## Tests and rail checks
+## License
 
-```bash
-pnpm test:e2e     # golden path plus failure path, offline
-pnpm verify       # Graph plus Hedera plus Sepolia connectivity
-pnpm hedera:test  # land a real Hedera testnet receipt
-```
-
-## Bounty tracks
-
-The Graph (Best AI Tooling), Hedera (AI and Agentic Payments), ENS (agent identity and discovery), 0G (Infra and Tooling).
+MIT
