@@ -9,7 +9,7 @@
 
 import { createServer } from "node:http";
 import { emit, gbe, HUB_URL } from "./events.js";
-import { hederaEnabled, hederaReceipt } from "./hedera.js";
+import { hederaEnabled, hederaReceipt, hederaSettle } from "./hedera.js";
 import { isHumanVerified } from "./world.js";
 
 // live per-lane feature policy, refreshed from the hub (dashboard toggles).
@@ -35,7 +35,9 @@ if (!upstream) {
 }
 
 const price = Number(flag("price", "0.01"));
-const payTo = flag("pay-to", "0xGLASSBOX_SELLER")!;
+// your connected wallet = the API's owner AND payout address. This is the join key:
+// the dashboard (logged in as a wallet) shows the APIs whose payTo == that wallet.
+const payTo = flag("wallet") ?? flag("pay-to") ?? "0xGLASSBOX_SELLER";
 const lane = flag("name", new URL(upstream).hostname.replace(/^api\./, "").split(".")[0])!;
 const port = Number(flag("port", "4030"));
 const sample = flag("sample", "/")!; // a known-good path, used by the Lens "send test buyer" button
@@ -111,9 +113,10 @@ const server = createServer(async (req, res) => {
   await emit(gbe("settled", lane, reqId, { from, amount: effPrice, txHash: settle.txHash, payTo, path, tier, verified, ua: String(req.headers["user-agent"] ?? "") }));
 
   if (HEDERA_LIVE) {
-    hederaReceipt(JSON.stringify({ lane, from, amount: effPrice, payTo }))
-      .then((r) => emit(gbe("hedera_receipt", lane, reqId, { hashscan: r.hashscan, topicId: r.topicId, txId: r.txId })))
-      .catch((e) => console.error("hedera receipt failed:", String(e)));
+    // real HBAR moves to the seller account → the operator watches their balance grow
+    hederaSettle(effPrice)
+      .then((r) => r && emit(gbe("hedera_receipt", lane, reqId, { hashscan: r.hashscan, txId: r.txId })))
+      .catch((e) => console.error("hedera settle failed:", String(e)));
   }
 
   // forward to the upstream API — our keys, never the buyer's
@@ -156,6 +159,6 @@ function corsHeaders() {
 }
 
 server.listen(port, async () => {
-  await emit(gbe("lane_up", lane, crypto.randomUUID(), { upstream, price, payTo, port, sample }));
-  console.log(`💰 ${lane} is now a business:  http://localhost:${port}  →  ${upstream}   ($${price}/call → ${payTo})`);
+  await emit(gbe("lane_up", lane, crypto.randomUUID(), { upstream, price, payTo, owner: payTo, port, sample }));
+  console.log(`💰 ${lane} is now a business:  http://localhost:${port}  →  ${upstream}   ($${price}/call → owner ${payTo})`);
 });

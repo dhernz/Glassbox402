@@ -76,3 +76,13 @@ export async function hederaTransfer(toAccountId: string, hbar = 0.001): Promise
   const txId = tx.transactionId!.toString();
   return { txId, topicId: "", hashscan: hashscanTx(txId) };
 }
+
+// Settlement the operator can WATCH: real HBAR moves from the payer (operator)
+// to the seller account, so the connected wallet's balance grows on-chain.
+// hbar amount is scaled from the USD price so growth is visible in the demo.
+export async function hederaSettle(usdAmount: number): Promise<HederaReceipt | null> {
+  const seller = process.env.HEDERA_SELLER_ACCOUNT;
+  if (!seller) return null;
+  const hbar = Math.max(0.02, usdAmount * 5); // demo scaling: $0.01 → 0.05ℏ, $0.10 → 0.5ℏ
+  return hederaTransfer(seller, hbar);
+}
