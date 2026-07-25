@@ -1,0 +1,28 @@
+# **/node_modules, not node_modules: dockerignore patterns anchor at the context
+# root, so the bare form would leave core/node_modules and lens/node_modules in
+# the context and `COPY core core` would stomp the pnpm symlink farm created by
+# `pnpm install`.
+**/node_modules
+**/dist
+
+.git
+.gitignore
+
+# Secrets live in Railway's environment, never in a layer.
+.env
+*.pem
+signing-key-*.json
+
+# Not a workspace member and not used at runtime.
+packages
+
+# Recorded sessions; core/seed.jsonl is the one that ships, and it is
+# deliberately not named *.tape.jsonl so .gitignore keeps its hands off it.
+*.tape.jsonl
+
+.gstack
+.claude
+design
+test
+*.md
+demo.sh
