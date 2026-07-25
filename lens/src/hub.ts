@@ -100,7 +100,7 @@ export interface Policy {
   priceCeiling?: number;
 }
 
-export interface Analytics {
+export interface Snapshot {
   totalIncome: number;
   totalRequests: number;
   avgPrice: number;
@@ -108,6 +108,12 @@ export interface Analytics {
   byHour: number[];
   byCountry: { code: string; name: string; flag: string; value: number }[];
   byPayer: { payer: string; spend: number; calls: number }[];
+}
+
+// The top-level fields are the "All APIs" fold; byLane holds the same shape per
+// API, keyed by lane name, for every lane that is currently live.
+export interface Analytics extends Snapshot {
+  byLane: Record<string, Snapshot>;
 }
 
 // Connect the judge's real MetaMask wallet. Returns the EVM address (which is

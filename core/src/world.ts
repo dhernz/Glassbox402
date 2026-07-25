@@ -117,9 +117,13 @@ export async function rpContext(action = ACTION) {
 export async function verifyWorldProof(result: any): Promise<{ ok: boolean; nullifier?: string; error?: string }> {
   if (!worldLive()) return { ok: false, error: "world_not_configured" };
 
-  // The widget can hand back either shape, and the *Legacy presets (Selfie Check,
-  // orbLegacy) return the 3.0 one — so requiring `responses[]` rejects a perfectly
-  // good selfie proof before it ever reaches World. Unwrap common nestings too.
+  // Despite the name, `selfieCheckLegacy` hands back a World ID *4.0* payload:
+  // `responses[]` is present, and `responses[0].identifier` is "face". That string
+  // is what tells a selfie credential apart from an Orb one, and World documents it
+  // nowhere — we only learned it by logging a successful scan (WORLD-SELFIE-CHECK.md
+  // §2.7). We assumed the opposite when writing this, hence the 3.0 branch below:
+  // it is kept as a defensive fallback for other presets, NOT the Selfie Check path.
+  // Unwrap common nestings too.
   const p = result?.responses || result?.merkle_root ? result
     : (result?.result ?? result?.payload ?? result?.proof_payload ?? result);
   const is40 = Array.isArray(p?.responses) && p.responses.length > 0;

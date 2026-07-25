@@ -132,6 +132,9 @@ function Dashboard({ wallet, onDisconnect }: { wallet: string; onDisconnect: () 
   const [payments, setPayments] = useState<Map<string, Payment>>(new Map());
   const [policies, setPolicies] = useState<Map<string, Policy>>(new Map());
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
+  // Which API the seller is looking at. null = "All APIs". Lifted out of the
+  // views so a choice made in Features carries into Analytics and back.
+  const [selectedLane, setSelectedLane] = useState<string | null>(null);
   const [hcsTopicUrl, setHcsTopicUrl] = useState(""); // the receipt topic, once the hub opens one
   const [wsUp, setWsUp] = useState(false);
   const [balance, setBalance] = useState<number | null>(null);
@@ -407,9 +410,15 @@ function Dashboard({ wallet, onDisconnect }: { wallet: string; onDisconnect: () 
               {view === "payments" && (
                 <Payments payments={myPayments} income={income} now={now} onTestBuyer={doTestBuyer} hasApis={hasApis} hcsTopicUrl={hcsTopicUrl} />
               )}
-              {view === "analytics" && <AnalyticsView a={analytics} />}
+              {view === "analytics" && (
+                <AnalyticsView a={analytics} myLanes={myLanes} selected={selectedLane} onSelect={setSelectedLane} />
+              )}
               {view === "features" && (
-                <Features myLanes={myLanes} policies={policies} setPolicyFor={setPolicyFor} goOverview={() => setView("overview")} />
+                <Features
+                  myLanes={myLanes} policies={policies} setPolicyFor={setPolicyFor}
+                  selected={selectedLane} onSelect={setSelectedLane}
+                  goOverview={() => setView("overview")}
+                />
               )}
               {view === "settings" && <Settings wallet={wallet} balance={balance} onDisconnect={onDisconnect} />}
             </div>
@@ -808,40 +817,87 @@ function PaymentRow({ p, now }: { p: Payment & { fresh?: boolean }; now: number 
 }
 
 /* ============================================================
+   API SELECTOR — shared by Analytics and Features
+   ============================================================ */
+function LaneChips(props: {
+  lanes: Lane[];
+  selected: string | null;
+  onSelect: (lane: string | null) => void;
+  label: string;
+  all?: boolean; // offer an "All APIs" chip (Analytics); a policy applies to exactly one API
+}) {
+  const { lanes, selected, onSelect, label, all } = props;
+  return (
+    <div className="lane-select">
+      <span className="section-label">{label}</span>
+      {all && (
+        <button className={"chip" + (selected === null ? " active" : "")} onClick={() => onSelect(null)}>All APIs</button>
+      )}
+      {lanes.map((l) => (
+        <button key={l.name} className={"chip" + (l.name === selected ? " active" : "")} onClick={() => onSelect(l.name)}>{l.name}</button>
+      ))}
+    </div>
+  );
+}
+
+/* ============================================================
    ANALYTICS
    ============================================================ */
-function AnalyticsView({ a }: { a: Analytics | null }) {
-  const epMax = a ? Math.max(1, ...a.byEndpoint.map((e) => e.value)) : 1;
-  const hourMax = a ? Math.max(1, ...a.byHour) : 1;
-  const countryTotal = a ? a.byCountry.reduce((s, c) => s + c.value, 0) || 1 : 1;
+function AnalyticsView({ a, myLanes, selected, onSelect }: {
+  a: Analytics | null;
+  myLanes: Lane[];
+  selected: string | null;
+  onSelect: (lane: string | null) => void;
+}) {
+  // The hub scopes byLane to the APIs that are live, so a selection pointing at
+  // a gateway that just died falls back to the combined view rather than 404ing
+  // into an empty panel.
+  const scoped = selected && a?.byLane?.[selected] ? a.byLane[selected] : a;
+  const laneLabel = selected && a?.byLane?.[selected] ? selected : null;
+
+  const epMax = scoped ? Math.max(1, ...scoped.byEndpoint.map((e) => e.value)) : 1;
+  const hourMax = scoped ? Math.max(1, ...scoped.byHour) : 1;
+  const countryTotal = scoped ? scoped.byCountry.reduce((s, c) => s + c.value, 0) || 1 : 1;
   const epColors = ["", "a2", "a3"];
   return (
     <section className="view-fade">
       <div className="page-head">
         <div>
           <div className="page-title">Analytics</div>
-          <div className="page-sub">Who's calling your API, from where, and what they pay for.</div>
+          <div className="page-sub">
+            {laneLabel
+              ? <>Who's calling <span className="mono">{laneLabel}</span>, from where, and what they pay for.</>
+              : "Who's calling your APIs, from where, and what they pay for."}
+          </div>
         </div>
         <span className="badge neutral"><span className="bdot" />live · refreshes every 2s</span>
       </div>
 
-      {!a || a.totalRequests === 0 ? (
-        <div className="empty-state">No traffic yet. Once payments settle, the distributions appear here.</div>
+      {myLanes.length > 0 && (
+        <LaneChips lanes={myLanes} selected={selected} onSelect={onSelect} label="Showing" all />
+      )}
+
+      {!scoped || scoped.totalRequests === 0 ? (
+        <div className="empty-state">
+          {laneLabel
+            ? <>No traffic on <span className="mono">{laneLabel}</span> yet. Its payments appear here once they settle.</>
+            : "No traffic yet. Once payments settle, the distributions appear here."}
+        </div>
       ) : (
         <div className="analytics-grid">
           {/* Calls by endpoint */}
           <div className="panel">
-            <div className="panel-head"><div className="panel-title">Calls by endpoint</div><div className="panel-cap">{a.totalRequests.toLocaleString()} requests</div></div>
-            {a.byEndpoint.slice(0, 6).map((e, i) => (
+            <div className="panel-head"><div className="panel-title">Calls by endpoint</div><div className="panel-cap">{scoped.totalRequests.toLocaleString()} requests</div></div>
+            {scoped.byEndpoint.slice(0, 6).map((e, i) => (
               <div className="hbar" key={e.key}>
                 <div className="hbar-label" title={e.key}>{e.key}</div>
                 <div className="hbar-track"><div className={"hbar-fill " + (epColors[i] ?? "")} style={{ width: `${(e.value / epMax) * 100}%` }} /></div>
-                <div className="hbar-val">{Math.round((e.value / a.totalRequests) * 100)}%</div>
+                <div className="hbar-val">{Math.round((e.value / scoped.totalRequests) * 100)}%</div>
               </div>
             ))}
             <div className="hr" />
             <div className="row" style={{ justifyContent: "space-between", fontSize: 14, color: "var(--text-tertiary)" }}>
-              <span>{a.totalRequests.toLocaleString()} requests total</span><span className="mono">{usd(a.totalIncome, 2)} earned</span>
+              <span>{scoped.totalRequests.toLocaleString()} requests total</span><span className="mono">{usd(scoped.totalIncome, 2)} earned</span>
             </div>
           </div>
 
@@ -849,21 +905,21 @@ function AnalyticsView({ a }: { a: Analytics | null }) {
           <div className="panel">
             <div className="panel-head"><div className="panel-title">Calls by hour of day</div><div className="panel-cap">UTC</div></div>
             <div className="vbars">
-              {a.byHour.map((v, h) => (
+              {scoped.byHour.map((v, h) => (
                 <div key={h} className={"vbar" + (v === hourMax && v > 0 ? " peak" : "")} style={{ height: `${Math.max(3, (v / hourMax) * 100)}%` }} title={`${String(h).padStart(2, "0")}:00 — ${v}`} />
               ))}
             </div>
             <div className="vaxis"><span>00</span><span>06</span><span>12</span><span>18</span><span>23</span></div>
             <div className="hr" />
             <div className="row" style={{ justifyContent: "space-between", fontSize: 14, color: "var(--text-tertiary)" }}>
-              <span>Peak {String(a.byHour.indexOf(hourMax)).padStart(2, "0")}:00 UTC</span><span className="mono">{hourMax} req/hr</span>
+              <span>Peak {String(scoped.byHour.indexOf(hourMax)).padStart(2, "0")}:00 UTC</span><span className="mono">{hourMax} req/hr</span>
             </div>
           </div>
 
           {/* Top countries */}
           <div className="panel">
             <div className="panel-head"><div className="panel-title">Top countries</div><div className="panel-cap">demo geo</div></div>
-            {a.byCountry.slice(0, 6).map((c) => (
+            {scoped.byCountry.slice(0, 6).map((c) => (
               <div className="brow" key={c.code}>
                 <div>
                   <div className="brow-top"><span className="brow-flag">{c.flag}</span><span className="brow-name">{c.name}</span></div>
@@ -877,7 +933,7 @@ function AnalyticsView({ a }: { a: Analytics | null }) {
           {/* Top payers */}
           <div className="panel">
             <div className="panel-head"><div className="panel-title">Top payers</div><div className="panel-cap">by spend</div></div>
-            {a.byPayer.slice(0, 6).map((p) => {
+            {scoped.byPayer.slice(0, 6).map((p) => {
               const agent = !p.payer.startsWith("0x");
               return (
                 <div className="payer-row" key={p.payer}>
@@ -904,10 +960,13 @@ function Features(props: {
   myLanes: Lane[];
   policies: Map<string, Policy>;
   setPolicyFor: (lane: string, patch: Partial<Policy>) => void;
+  selected: string | null;
+  onSelect: (lane: string | null) => void;
   goOverview: () => void;
 }) {
-  const { myLanes, policies, setPolicyFor } = props;
-  const [selected, setSelected] = useState<string>(myLanes[0]?.name ?? "");
+  const { myLanes, policies, setPolicyFor, selected, onSelect } = props;
+  // A policy applies to exactly one API, so "All APIs" (null) resolves to the
+  // first one rather than offering a combined view that couldn't be saved.
   const laneName = myLanes.find((l) => l.name === selected)?.name ?? myLanes[0]?.name ?? "";
 
   // fetch current policy for the selected lane when it changes
@@ -936,14 +995,7 @@ function Features(props: {
         <div><div className="page-title">Features</div><div className="page-sub">Pricing rules and access controls — applied live to your API.</div></div>
       </div>
 
-      {myLanes.length > 1 && (
-        <div className="lane-select">
-          <span className="section-label">Configuring</span>
-          {myLanes.map((l) => (
-            <button key={l.name} className={"chip" + (l.name === laneName ? " active" : "")} onClick={() => setSelected(l.name)}>{l.name}</button>
-          ))}
-        </div>
-      )}
+      <LaneChips lanes={myLanes} selected={laneName} onSelect={onSelect} label="Configuring" />
 
       {/* Human-verified callers (World ID) */}
       <div className="feature">

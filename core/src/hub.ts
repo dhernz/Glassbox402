@@ -9,7 +9,7 @@
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createConnection } from "node:net";
-import { appendFileSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { WebSocketServer, WebSocket } from "ws";
 import { loadEnv } from "./env.js";
 import { HUB_PORT, gbe, type GBEvent } from "./events.js";
@@ -76,7 +76,7 @@ async function receiptFor(ev: GBEvent) {
 
 function broadcast(ev: GBEvent, record = true) {
   if (ev.type === "lane_up") lanes.set(ev.lane, { name: ev.lane, ...ev.data });
-  if (ev.type === "settled") { analytics.ingest(ev.data as any); void receiptFor(ev); }
+  if (ev.type === "settled") { analytics.ingest(ev.lane, ev.data as any, ev.t); void receiptFor(ev); }
   ring.push(ev);
   if (ring.length > RING_MAX) ring.shift();
   if (record && !replayFile) {
@@ -158,7 +158,10 @@ const server = createServer(async (req, res) => {
       return json(res, 200, { lanes: checks.filter((c) => c.alive).map((c) => c.l) });
     }
     if (url.pathname === "/analytics") {
-      return json(res, 200, analytics.snapshot());
+      // Scoped to the lanes that are actually up: `lanes` is pruned by /lanes,
+      // so a dead API drops out of analytics exactly as it drops out of the API
+      // list — and history for a lane that no longer exists never resurfaces.
+      return json(res, 200, analytics.snapshot([...lanes.keys()]));
     }
     // World ID: verify the buyer ONCE, then hand back a short-lived signed token
     // they present per request. The gateway checks the signature locally, so the
@@ -254,6 +257,7 @@ server.on("upgrade", (req, socket, head) => {
 server.listen(HUB_PORT, () => {
   console.log(`⚡ glassbox hub on :${HUB_PORT}  (tape: ${replayFile ? `REPLAY ${replayFile}` : tapeFile})`);
   if (replayFile) startReplay(replayFile);
+  else hydrateFromTape();
   // Open the receipt topic now, so the first payment of the demo isn't the one
   // paying for topic creation.
   if (hederaEnabled() && !replayFile) {
@@ -263,6 +267,35 @@ server.listen(HUB_PORT, () => {
     console.log("🪵 no HEDERA_ACCOUNT_ID/HEDERA_PRIVATE_KEY — HCS receipts off");
   }
 });
+
+// Analytics and policies live in memory, so before this the dashboard opened
+// blank after every restart and the seller's feature toggles silently reset to
+// off — which quietly flattens the World ID price tiers mid-demo. The tape has
+// the history; read it back at boot.
+//
+// Deliberately NOT routed through broadcast(): that would re-append every event
+// to the tape, fire a live HCS receipt per historical payment, and push stale
+// events into the ring that fresh dashboards replay. Hydration touches the two
+// aggregates and nothing else. Lanes are filtered later, at /analytics, because
+// gateways only register themselves after the hub is already up.
+function hydrateFromTape() {
+  if (!existsSync(tapeFile)) return;
+  let payments = 0, policyEvents = 0;
+  try {
+    for (const line of readFileSync(tapeFile, "utf8").split("\n")) {
+      if (!line) continue;
+      let ev: GBEvent;
+      try { ev = JSON.parse(line); } catch { continue } // a half-written last line is normal
+      if (ev.type === "settled") { analytics.ingest(ev.lane, ev.data as any, ev.t); payments++; }
+      else if (ev.type === "policy") { policies.set(ev.lane, ev.data); policyEvents++; }
+    }
+  } catch (e) {
+    return console.error("tape hydrate failed:", String(e).split("\n")[0]);
+  }
+  if (payments || policyEvents) {
+    console.log(`📊 hydrated ${payments} payments + ${policyEvents} policy changes from ${tapeFile}`);
+  }
+}
 
 function startReplay(file: string) {
   const events: GBEvent[] = readFileSync(file, "utf8")
