@@ -18,14 +18,19 @@
 
 import { createHmac, timingSafeEqual } from "node:crypto";
 
-const APP_ID = process.env.WORLD_APP_ID;            // app_xxx from developer.world.org
+// World ID 4.0 identifies the relying party by rp_id and has the RP's backend
+// SIGN each proof request with a signer key. app_id is the legacy 3.0 handle,
+// still needed by the widget.
+const RP_ID = process.env.WORLD_RP_ID;              // rp_xxx from developer.world.org
+const APP_ID = process.env.WORLD_APP_ID;            // app_xxx (legacy, for the widget)
+const SIGNING_KEY = process.env.WORLD_RP_SIGNING_KEY; // hex signer key — server only, never shipped
 const ACTION = process.env.WORLD_ACTION ?? "x402-verify";
 // "simulated" lets the hub mint tokens without a real World proof, for when the
 // Selfie Check beta isn't enabled on the app yet. It does NOT weaken the gateway:
 // tokens are still signed, so an unverified caller still can't mint one. The UI
 // labels the tier as simulated whenever this is on.
-export const WORLD_MODE = process.env.WORLD_MODE ?? (APP_ID ? "live" : "simulated");
-export const worldLive = () => WORLD_MODE === "live" && !!APP_ID;
+export const WORLD_MODE = process.env.WORLD_MODE ?? (RP_ID && SIGNING_KEY ? "live" : "simulated");
+export const worldLive = () => WORLD_MODE === "live" && !!RP_ID && !!SIGNING_KEY;
 
 const TTL_MS = Number(process.env.WORLD_TOKEN_TTL_MS ?? 15 * 60 * 1000);
 
@@ -81,27 +86,56 @@ export function verifySessionToken(token: string | undefined | null): WorldSessi
   return { ok: true, nullifier, simulated: mode === "s", exp };
 }
 
-/** Verify a World ID proof with the Developer Portal. Async, network — the hub
- *  calls this once per buyer, never the gateway. Returns the nullifier so the
- *  caller can mint a session token bound to that human. */
-export async function verifyWorldProof(proof: any): Promise<{ ok: boolean; nullifier?: string; error?: string }> {
+/** The signed request context the IDKit widget needs. World ID 4.0 requires the
+ *  RP's backend to sign every proof request, so this must never run in the
+ *  browser — the signing key stays here. The widget also wants the legacy app_id. */
+export async function rpContext(action = ACTION) {
+  if (!worldLive()) return null;
+  const { signRequest } = await import("@worldcoin/idkit-core/signing");
+  const s: any = signRequest({ signingKeyHex: SIGNING_KEY!, action });
+  return {
+    app_id: APP_ID,
+    action,
+    // which credential the widget should ask for: selfie | orb | passport | human.
+    // Selfie Check is the low-friction one and needs no Orb, but it's beta and
+    // must be enabled on the app — hence a config switch, not a code change.
+    credential: process.env.WORLD_CREDENTIAL ?? "selfie",
+    rp_context: {
+      rp_id: RP_ID,
+      nonce: s.nonce,
+      created_at: s.createdAt ?? s.created_at,
+      expires_at: s.expiresAt ?? s.expires_at,
+      signature: s.sig ?? s.signature,
+    },
+  };
+}
+
+/** Verify a World ID 4.0 proof with the Developer Portal. Async, network — the hub
+ *  calls this once per buyer, never the gateway. Takes the whole IDKitResult and
+ *  returns the rp-scoped nullifier, which is the stable per-human handle we bind
+ *  the session token to. */
+export async function verifyWorldProof(result: any): Promise<{ ok: boolean; nullifier?: string; error?: string }> {
   if (!worldLive()) return { ok: false, error: "world_not_configured" };
-  if (!proof?.nullifier_hash || !proof?.proof) return { ok: false, error: "malformed_proof" };
+  if (!Array.isArray(result?.responses) || result.responses.length === 0) {
+    return { ok: false, error: "malformed_proof" };
+  }
   try {
-    const r = await fetch(`https://developer.worldcoin.org/api/v2/verify/${APP_ID}`, {
+    const r = await fetch(`https://developer.world.org/api/v4/verify/${RP_ID}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        nullifier_hash: proof.nullifier_hash,
-        merkle_root: proof.merkle_root,
-        proof: proof.proof,
-        verification_level: proof.verification_level,
-        signal_hash: proof.signal_hash,
-        action: proof.action ?? ACTION,
+        protocol_version: result.protocol_version ?? "4.0",
+        nonce: result.nonce,
+        action: result.action ?? ACTION,
+        environment: result.environment,
+        responses: result.responses,
+        user_presence_completed: result.user_presence_completed,
       }),
     });
     const j: any = await r.json().catch(() => ({}));
-    if (r.ok && j?.success === true) return { ok: true, nullifier: proof.nullifier_hash };
+    if (r.ok && j?.success === true) {
+      return { ok: true, nullifier: j.nullifier ?? result.responses[0]?.nullifier };
+    }
     return { ok: false, error: j?.code ?? j?.detail ?? `verify_failed_${r.status}` };
   } catch (e) {
     return { ok: false, error: String(e).split("\n")[0] };

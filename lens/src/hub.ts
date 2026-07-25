@@ -206,6 +206,24 @@ export async function buyUrl(url: string, verified: boolean, method?: string, bo
 // World ID: verify once, get a short-lived signed token. The gateway checks that
 // signature on every request, so presenting the token is what buys the human
 // tier — claiming to be human no longer does anything.
+// What the IDKit widget needs, signed by the hub (World ID 4.0 makes the relying
+// party sign each proof request). live:false means World isn't configured, so the
+// UI offers a clearly-labelled simulated session instead of pretending.
+export interface WorldContext {
+  live: boolean;
+  app_id?: string;
+  action?: string;
+  credential?: string;
+  rp_context?: Record<string, unknown>;
+}
+export async function worldContext(): Promise<WorldContext> {
+  try {
+    return (await fetch(`${HUB}/world/context`).then((r) => r.json())) as WorldContext;
+  } catch {
+    return { live: false };
+  }
+}
+
 export interface WorldVerifyResult { ok: boolean; token?: string; simulated?: boolean; error?: string }
 export async function worldVerify(wallet: string, proof?: unknown): Promise<WorldVerifyResult> {
   try {

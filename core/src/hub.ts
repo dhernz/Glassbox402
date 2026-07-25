@@ -14,7 +14,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { loadEnv } from "./env.js";
 import { HUB_PORT, gbe, type GBEvent } from "./events.js";
 import { Analytics } from "./analytics.js";
-import { verifyWorldProof, issueSessionToken, worldLive, WORLD_MODE } from "./world.js";
+import { verifyWorldProof, issueSessionToken, rpContext, worldLive, WORLD_MODE } from "./world.js";
 import { hederaEnabled, ensureTopic, hederaReceipt } from "./hedera.js";
 
 // ./hedera.js reads the operator credentials lazily, inside its functions, so
@@ -163,6 +163,14 @@ const server = createServer(async (req, res) => {
     // World ID: verify the buyer ONCE, then hand back a short-lived signed token
     // they present per request. The gateway checks the signature locally, so the
     // human tier can't be claimed by just setting a header.
+    // What the IDKit widget needs to open a proof request: the legacy app_id plus
+    // an rp_context signed here with the RP signer key (4.0 requires the relying
+    // party to sign every request). Returns live:false when World isn't set up,
+    // so the UI can say "simulated" instead of pretending.
+    if (url.pathname === "/world/context") {
+      const ctx = await rpContext();
+      return json(res, 200, ctx ? { live: true, ...ctx } : { live: false, mode: WORLD_MODE });
+    }
     if (req.method === "POST" && url.pathname === "/world/verify") {
       const { proof, wallet } = await readBody(req);
       if (worldLive()) {

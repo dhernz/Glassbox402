@@ -1,10 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  api, sendTestBuyer, buyFromLane, buyUrl, worldVerify, fetchHbarBalance, balanceAccountFor, walletAliases,
+  api, sendTestBuyer, buyFromLane, buyUrl, worldVerify, worldContext, fetchHbarBalance, balanceAccountFor, walletAliases,
   shortAddr, avatarGradient, hostOf, usd, ago, connectMetaMask, hashscanAccount, DEFAULT_WALLET,
+  type WorldContext,
   type GBEvent, type Lane, type Payment, type Policy, type Analytics, type Tier,
 } from "./hub";
 import { HUB_WS } from "./hub";
+import { IDKitRequestWidget, selfieCheckLegacy, orbLegacy, passport, proofOfHuman } from "@worldcoin/idkit";
+
+// Which World credential to request. Selfie Check is the low-friction one (no
+// Orb) and the one we want; it's beta, so the backend picks via WORLD_CREDENTIAL
+// and we just map the name to a preset.
+function presetFor(credential: string | undefined, signal: string) {
+  switch (credential) {
+    case "orb": return orbLegacy({ signal });
+    case "passport": return passport({ signal });
+    case "human": return proofOfHuman({ signal });
+    default: return selfieCheckLegacy({ signal });
+  }
+}
 import {
   IconOverview, IconApis, IconPayments, IconAnalytics, IconFeatures, IconSettings,
   IconCopy, IconCheck, IconExternal, IconWallet, IconShield, IconBolt,
@@ -1218,18 +1232,28 @@ function BuyerPlayground() {
   const [world, setWorld] = useState<{ token: string; simulated: boolean; exp: number } | null>(null);
   const [verifying, setVerifying] = useState(false);
   const [worldErr, setWorldErr] = useState<string | null>(null);
+  const [worldCtx, setWorldCtx] = useState<WorldContext | null>(null);
+  const [idkitOpen, setIdkitOpen] = useState(false);
   const worldValid = !!world && world.exp > now;
 
+  // Is World ID actually configured on the backend? Decides whether clicking
+  // Verify opens the real IDKit flow or mints a labelled simulated session.
+  useEffect(() => { worldContext().then(setWorldCtx).catch(() => setWorldCtx({ live: false })); }, []);
+
+  const acceptToken = (r: { ok: boolean; token?: string; simulated?: boolean; error?: string }) => {
+    if (!r.ok || !r.token) { setWorldErr(r.error ?? "verification failed"); return; }
+    const exp = Number(r.token.split(".")[2]) || Date.now() + 15 * 60 * 1000;
+    setWorld({ token: r.token, simulated: !!r.simulated, exp });
+    setWorldErr(null);
+  };
+
   const doVerify = async () => {
-    setVerifying(true); setWorldErr(null);
-    try {
-      // With Selfie Check enabled on the app this carries a real IDKit proof;
-      // until then the hub mints a signed-but-simulated session and says so.
-      const r = await worldVerify(DEFAULT_WALLET);
-      if (!r.ok || !r.token) { setWorldErr(r.error ?? "verification failed"); return; }
-      const exp = Number(r.token.split(".")[2]) || Date.now() + 15 * 60 * 1000;
-      setWorld({ token: r.token, simulated: !!r.simulated, exp });
-    } finally { setVerifying(false); }
+    setWorldErr(null);
+    // Live: open World's widget, prove with World App, hub checks it with World.
+    if (worldCtx?.live) { setIdkitOpen(true); return; }
+    // Not configured: signed session, no human verified — and it says so.
+    setVerifying(true);
+    try { acceptToken(await worldVerify(DEFAULT_WALLET)); } finally { setVerifying(false); }
   };
 
   const priceFor = (lane: Lane, verified: boolean) => {
@@ -1300,6 +1324,21 @@ function BuyerPlayground() {
               </>
             )}
             {worldErr && <span className="world-err">{worldErr}</span>}
+            {worldCtx?.live && (
+              <IDKitRequestWidget
+                open={idkitOpen}
+                onOpenChange={setIdkitOpen}
+                app_id={worldCtx.app_id!}
+                action={worldCtx.action!}
+                rp_context={worldCtx.rp_context}
+                allow_legacy_proofs={true}
+                preset={presetFor(worldCtx.credential, DEFAULT_WALLET)}
+                // World returns the proof here; the hub is what checks it with
+                // World and mints the session token. The browser never decides.
+                handleVerify={async (result: unknown) => { acceptToken(await worldVerify(DEFAULT_WALLET, result)); }}
+                onSuccess={() => setIdkitOpen(false)}
+              />
+            )}
           </div>
 
           <div className="section-label" style={{ marginBottom: 12 }}>Directory · {lanes.length} API{lanes.length === 1 ? "" : "s"}</div>
