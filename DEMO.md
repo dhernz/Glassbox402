@@ -61,7 +61,13 @@ Back on the seller: **Features** → toggle **Require human-verified callers**. 
 Buyer tab: click **buy as verified human** and **buy as anonymous bot** on the same API side by side — **$0.01 vs $0.10**, both with real responses and real txs.
 *"Same endpoint. Pricing by humanity, as a toggle."*
 
-**5. Close — 15s.**
+**5. The encore: an AI pays for its own data — 20s.**
+Have a Claude window open with the GlassBox402 MCP server connected (`.mcp.json` ships in the repo). Ask it something it can't answer for free:
+*"what's the TVL of the top Uniswap v3 pools? use glassbox402."*
+It calls `list_paid_apis`, finds the subgraph, calls `paid_fetch` — and **the payment lands on the dashboard mid-answer**.
+*"No signup, no key, no human in the loop. The agent found a priced API and bought the data it needed. That's the whole thesis in one sentence of chat."*
+
+**6. Close — 15s.**
 *"Any API becomes a machine-payable business in one command, the money settles on Hedera, and for the first time the seller can actually see it. `x402ify` is on npm — you can wrap your API before I leave the stage."*
 
 ---
@@ -72,7 +78,7 @@ Buyer tab: click **buy as verified human** and **buy as anonymous bot** on the s
 
 **World — human-verified pricing.** Access and price based on human-backed verification: World ID holders get base price, unverified bots pay a multiplier or are blocked entirely. It's a per-API operator toggle in **Features**, not a bolt-on — and it demos as two buttons with two different prices on the same endpoint.
 
-**The Graph — reusable x402 payment tooling.** `x402ify` + the dashboard are drop-in x402 monetization and analytics for any API, and the demo monetizes a **real Uniswap v3 subgraph** (id `5zvR82Qo…VENFV`) at 0.02 HBAR per GraphQL query — agents get pay-per-query on-chain data with no Studio account, because the operator's Bearer key stays server-side.
+**The Graph — reusable x402 payment tooling.** Hits all three named categories: `x402ify` + the dashboard are drop-in **x402 payment tooling** for any API; the **MCP server** (`core/src/mcp.ts`) turns any Claude/GPT agent into a paying customer with `list_paid_apis` + `paid_fetch`; and the demo monetizes a **real Uniswap v3 subgraph** (id `5zvR82Qo…VENFV`) at 0.02 HBAR per GraphQL query — agents get pay-per-query on-chain data with no Studio account, because the operator's Bearer key stays server-side.
 
 ## Anticipate: "is this staged?"
 
@@ -84,9 +90,9 @@ Three answers, in order:
 
 ## What's real vs not (be honest at the booth)
 
-- ✅ **Real:** `x402ify` (published, v0.3.0 on npm), the protocol layer (official `@x402` packages), Hedera settlement via blocky402 with HashScan txs, all four upstream APIs returning real data, the dashboard/analytics/income, human-vs-bot pricing tiers.
+- ✅ **Real:** `x402ify` (published, v0.3.0 on npm), the protocol layer (official `@x402` packages), Hedera settlement via blocky402 with HashScan txs, all four upstream APIs returning real data, the dashboard/analytics/income, human-vs-bot pricing tiers, the **MCP server** (an agent pays with the same x402 client — verified against both a REST lane and the GraphQL subgraph, real txs).
 - 🟡 **Demo-grade:** World ID verification runs in demo-verify mode locally (real verification path is wired in `core/src/world.ts`); analytics **country** data is seeded with labeled synthetic origins because localhost has no real remote IPs.
-- ❌ **Not in this build:** mainnet, streaming payments (a toggle in Features, roadmap), the MCP server (`core/src/mcp.ts` predates the real-x402 rewrite and is currently broken — don't demo it).
+- ❌ **Not in this build:** mainnet, streaming payments (a toggle in Features, roadmap).
 
 ## Pocket answers
 

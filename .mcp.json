@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "glassbox402": {
+      "command": "pnpm",
+      "args": ["--dir", "core", "exec", "tsx", "src/mcp.ts"]
+    }
+  }
+}

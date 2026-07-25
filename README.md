@@ -62,6 +62,15 @@ These are not mocks. Each is a live third-party service that requires a key an a
 
 Every one of these was driven end to end: buyer pays over x402, gets the real upstream response, and the payment lands in the operator's Hedera wallet with a HashScan transaction. See [VALIDATION.md](./VALIDATION.md) for the evidence.
 
+## Any AI agent as a paying customer (MCP)
+
+The repo ships an MCP server (`core/src/mcp.ts`, wired in `.mcp.json`), so a Claude or GPT agent can shop the x402 market on its own:
+
+- `list_paid_apis` — what is for sale: name, price per call, the URL, and how to call it.
+- `paid_fetch` — pay the per-call price and get the data back, with the real Hedera transaction.
+
+Ask an agent something it cannot answer for free ("what is the TVL of the top Uniswap v3 pools? use glassbox402") and it discovers the subgraph, pays 0.02 HBAR, and answers — while the payment appears live on the dashboard. It signs with the same real x402 client the dashboard's test buyer uses, so these are on-chain payments, not a simulation. Set `HEDERA_ACCOUNT_ID` / `HEDERA_PRIVATE_KEY` in `.env` (the agent's buying wallet) and the server picks them up automatically.
+
 ## Business model
 
 **The operator earns the per-request x402 fee on whatever API they wrap.** That is the revenue, full stop. The buyer is not paying for "premium" access to a gated tier; they are paying the operator's per-call price to make the request at all.
