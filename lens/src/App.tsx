@@ -355,10 +355,11 @@ function Dashboard({ wallet, onDisconnect }: { wallet: string; onDisconnect: () 
     return () => clearInterval(iv);
   }, []);
 
-  /* ---- derived. The API directory is PUBLIC: every visitor sees every live
-     x402ified API and the payments flowing through them, because that market is
-     the product — a dashboard scoped to a stranger's fresh wallet would just be
-     empty. isMine() stays, but only to badge the ones the connected wallet owns.
+  /* ---- derived, scoped to the connected wallet. This is a seller's dashboard:
+     a lane belongs to whoever it pays out to, so only that wallet sees it as its
+     API and its income. Connecting someone else's wallet must NOT expose another
+     operator's business — the public surface is the buyer playground
+     (?app=buyer), which lists the market for anyone to shop.
      Alias-aware: the stack labels a seller by EVM address in some places and by
      Hedera account id in others. ---- */
   const aliases = useMemo(
@@ -366,10 +367,16 @@ function Dashboard({ wallet, onDisconnect }: { wallet: string; onDisconnect: () 
     [wallet, account?.accountId],
   );
   const isMine = useCallback((addr?: string) => !!addr && aliases.has(addr.toLowerCase()), [aliases]);
-  const myLanes = useMemo(() => [...lanes.values()], [lanes]);
+  const myLanes = useMemo(
+    () => [...lanes.values()].filter((l) => isMine(l.owner) || isMine(l.payTo)),
+    [lanes, isMine],
+  );
+  const myLaneNames = useMemo(() => new Set(myLanes.map((l) => l.name)), [myLanes]);
   const myPayments = useMemo(
-    () => [...payments.values()].sort((a, b) => b.t - a.t),
-    [payments],
+    () => [...payments.values()]
+      .filter((p) => myLaneNames.has(p.lane) || isMine(p.payTo))
+      .sort((a, b) => b.t - a.t),
+    [payments, myLaneNames, isMine],
   );
   const settledMine = useMemo(() => myPayments.filter((p) => p.status === "settled"), [myPayments]);
   const income = useMemo(() => settledMine.reduce((s, p) => s + p.amount, 0), [settledMine]);

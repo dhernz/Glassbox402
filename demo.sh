@@ -16,8 +16,17 @@ set -e
 cd "$(dirname "$0")"
 
 if [ -f .env ]; then set -a; source .env; set +a; fi
-export WALLET="${WALLET:-0x2403506eddcd48207ee982d7a8f86901365192ed}"
 export PORT="${PORT:-4021}"
+
+# No fallback address. This used to default to a specific wallet, which meant
+# anyone who ran demo.sh without setting WALLET silently sold their APIs into
+# someone else's payout account — and saw an empty dashboard, because the lanes
+# belonged to that other wallet.
+if [ -z "$WALLET" ]; then
+  echo "✖ WALLET is unset. Add it to .env — it's the address every payment settles to:"
+  echo "    WALLET=0xYourAddress"
+  exit 1
+fi
 
 # Built, not `vite dev`: the dev server mis-types .wasm as octet-stream, which
 # breaks World's IDKit widget ("Something went wrong", no console error). The
