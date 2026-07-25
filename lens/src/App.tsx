@@ -169,6 +169,8 @@ function Dashboard({ wallet, onDisconnect }: { wallet: string; onDisconnect: () 
         port: Number(ev.data.port ?? 0),
         sample: String(ev.data.sample ?? "/"),
         chain: String(ev.data.chain ?? "hedera"),
+        sampleMethod: ev.data.sampleMethod ? String(ev.data.sampleMethod) : undefined,
+        sampleBody: ev.data.sampleBody != null ? String(ev.data.sampleBody) : undefined,
       };
       setLanes((prev) => {
         const existed = prev.has(lane.name);
@@ -1069,20 +1071,50 @@ interface Receipt {
   t: number;
 }
 
+// Summarize a GraphQL-style data object: "chains: 40 items — Ethereum, Base, …".
+function summarizeData(d: any): string | undefined {
+  if (d == null || typeof d !== "object") return undefined;
+  const parts: string[] = [];
+  for (const [key, val] of Object.entries(d)) {
+    if (Array.isArray(val)) {
+      const names = val.slice(0, 5)
+        .map((x: any) => (x && typeof x === "object" ? (x.name ?? x.title ?? x.symbol ?? x.id) : x))
+        .filter((x) => x != null);
+      parts.push(`${key}: ${val.length} item${val.length === 1 ? "" : "s"}${names.length ? " — " + names.join(", ") + (val.length > names.length ? ", …" : "") : ""}`);
+    } else if (val && typeof val === "object") {
+      const name = (val as any).name ?? (val as any).title ?? (val as any).id;
+      parts.push(name != null ? `${key}: ${name}` : `${key}: {…}`);
+    } else if (val != null) {
+      parts.push(`${key}: ${val}`);
+    }
+  }
+  return parts.length ? parts.join(" · ") : undefined;
+}
+
 // Pull the meaningful field out of an upstream response for a clean receipt.
+// Handles scalar APIs (jokes, prices) and GraphQL responses ({ data: {...} }),
+// and never crashes on unparseable / truncated (20k) bodies.
 function extractResponse(body?: string): { value?: string; raw?: string } {
   if (!body) return {};
+  let j: any;
   try {
-    const j = JSON.parse(body);
-    if (j?.data?.amount && j?.data?.currency) {
-      return { value: `${j.data.base ?? ""}${j.data.base ? " " : ""}${j.data.amount} ${j.data.currency}`.trim(), raw: JSON.stringify(j, null, 2) };
-    }
-    const pick = j.value ?? j.message ?? j.joke ?? j.text ?? j.price ?? j.result;
-    if (pick != null && typeof pick !== "object") return { value: String(pick), raw: JSON.stringify(j, null, 2) };
-    return { raw: JSON.stringify(j, null, 2) };
+    j = JSON.parse(body);
   } catch {
+    // truncated (body is capped) / non-JSON — best-effort summary from any names,
+    // and keep the raw text in a scrollable box.
+    const names = [...body.matchAll(/"name"\s*:\s*"([^"]+)"/g)].map((m) => m[1]);
+    if (names.length) return { value: `${names.length}+ items — ${names.slice(0, 6).join(", ")}${names.length > 6 ? ", …" : ""}`, raw: body };
     return body.length <= 400 ? { value: body } : { raw: body };
   }
+  const raw = JSON.stringify(j, null, 2);
+  if (j?.data?.amount && j?.data?.currency) {
+    return { value: `${j.data.base ?? ""}${j.data.base ? " " : ""}${j.data.amount} ${j.data.currency}`.trim() };
+  }
+  const pick = j.value ?? j.message ?? j.joke ?? j.text ?? j.price ?? j.result;
+  if (pick != null && typeof pick !== "object") return { value: String(pick) };
+  // GraphQL / nested object → compact summary, with the full JSON in the <pre>
+  const summary = summarizeData(j?.data ?? j);
+  return summary ? { value: summary, raw } : { raw };
 }
 
 function BuyerPlayground() {
@@ -1216,9 +1248,11 @@ function BuyerPlayground() {
                 </div>
                 <div className="receipt-body">
                   {r.ok
-                    ? (r.value
-                      ? <div className="receipt-val">{r.value}</div>
-                      : <pre className="receipt-raw">{r.raw ?? "(no body)"}</pre>)
+                    ? (<>
+                        {r.value && <div className="receipt-val">{r.value}</div>}
+                        {r.raw && <pre className="receipt-raw">{r.raw}</pre>}
+                        {!r.value && !r.raw && <div className="receipt-val muted">(no body)</div>}
+                      </>)
                     : <div className="receipt-err">purchase failed{r.error ? `: ${r.error}` : ` (status ${r.status})`}</div>}
                 </div>
                 <div className="receipt-foot">

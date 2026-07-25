@@ -57,7 +57,9 @@ export interface Lane {
   owner?: string;
   port: number;
   sample: string;
-  chain?: string; // settlement chain, default "hedera"
+  chain?: string;         // settlement chain, default "hedera"
+  sampleMethod?: string;  // e.g. "POST" for GraphQL lanes (default GET)
+  sampleBody?: string;    // request body for POST/GraphQL lanes (e.g. a query)
 }
 
 // upstream URL → host, safely (e.g. https://api.chucknorris.io/x → api.chucknorris.io)
@@ -162,7 +164,7 @@ export const api = {
 // on Hedera and every hop streams back over the websocket. `verified` presents a
 // World-ID proof so the human-verified pricing tier applies.
 export async function sendTestBuyer(lane: Lane, verified = false): Promise<void> {
-  await buyUrl(laneUrl(lane), verified);
+  await buyFromLane(lane, verified);
 }
 
 // A real signed purchase, with the upstream response + Hedera settlement link.
@@ -181,19 +183,22 @@ export const laneUrl = (lane: Lane) => `http://localhost:${lane.port}${lane.samp
 // Buyer Playground: ask the backend to make a REAL signed x402 purchase as the
 // demo buyer — verified=World-ID human, or anonymous bot. Returns the upstream
 // body and the on-chain settlement, so the buyer side is verifiably real.
-export async function buyUrl(url: string, verified: boolean): Promise<BuyResult> {
+// GraphQL/POST lanes (e.g. Tally) pass method="POST" + a body (the query); GET
+// lanes leave them undefined so the backend does a plain GET.
+export async function buyUrl(url: string, verified: boolean, method?: string, body?: string): Promise<BuyResult> {
   try {
     const r = await fetch(`${HUB}/testbuyer`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ url, verified }),
+      body: JSON.stringify({ url, verified, method, body }),
     });
     return (await r.json()) as BuyResult;
   } catch (e) {
     return { ok: false, status: 0, error: String(e) };
   }
 }
-export const buyFromLane = (lane: Lane, verified: boolean) => buyUrl(laneUrl(lane), verified);
+export const buyFromLane = (lane: Lane, verified: boolean) =>
+  buyUrl(laneUrl(lane), verified, lane.sampleMethod, lane.sampleBody);
 
 // Live testnet balance (HBAR) for the connected wallet, via the Hedera mirror
 // node. Works with the 0x EVM alias. Returns HBAR (not tinybars), or null.
