@@ -4,7 +4,7 @@
   "version": "0.0.1",
   "type": "module",
   "bin": {
-    "x402ify": "src/x402ify.ts"
+    "x402ify": "bin/x402ify.mjs"
   },
   "scripts": {
     "hub": "tsx src/hub.ts",
@@ -13,9 +13,13 @@
   },
   "dependencies": {
     "@hashgraph/sdk": "^2.81.0",
+    "@hono/node-server": "^2.0.11",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@x402/core": "^2.19.0",
+    "@x402/fetch": "^2.19.0",
+    "@x402/hedera": "^2.19.0",
     "@x402/hono": "^2.19.0",
+    "hono": "^4.12.32",
     "viem": "^2.55.8",
     "ws": "^8.18.0",
     "zod": "^4.4.3"

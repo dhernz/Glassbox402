@@ -84,6 +84,17 @@ const server = createServer(async (req, res) => {
     if (url.pathname === "/analytics") {
       return json(res, 200, analytics.snapshot());
     }
+    if (req.method === "POST" && url.pathname === "/testbuyer") {
+      const { url: target, verified } = await readBody(req);
+      try {
+        const { getPaidFetch } = await import("./paid-fetch.js");
+        const init = verified ? { headers: { "x-world-proof": "demo-verified" } } : undefined;
+        const r = await getPaidFetch()(target, init as any);
+        return json(res, 200, { ok: r.ok, status: r.status });
+      } catch (e) {
+        return json(res, 200, { ok: false, error: String(e).split("\n")[0] });
+      }
+    }
     if (url.pathname.startsWith("/policy/")) {
       const lane = url.pathname.slice("/policy/".length);
       if (req.method === "POST") {

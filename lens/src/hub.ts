@@ -143,17 +143,17 @@ export const api = {
 // Drive a real x402 payment through a lane's proxy: fund a test buyer, hit the
 // sample path, read the 402 quote, retry with an X-PAYMENT header. Every hop
 // re-enters the hub as a GBEvent, so the dashboard lights up live.
-export async function sendTestBuyer(lane: Lane): Promise<void> {
-  const buyer = "0x" + "b0b" + Math.random().toString(16).slice(2, 10) + "cafe";
-  const price = Number(lane.price) || 0.01;
-  await api.faucet(buyer, Math.max(0.5, price * 4));
+// Real x402 payment needs a Hedera signature, which can't happen in the browser.
+// So the button asks the backend to sign+pay as the demo buyer; blocky402 settles
+// on Hedera and every hop streams back over the websocket. `verified` presents a
+// World-ID proof so the human-verified pricing tier applies.
+export async function sendTestBuyer(lane: Lane, verified = false): Promise<void> {
   const url = `http://localhost:${lane.port}${lane.sample || "/"}`;
-  const first = await fetch(url).catch(() => null);
-  if (!first || first.status !== 402) return;
-  const quote = await first.json().catch(() => null);
-  const amount = Number(quote?.accepts?.[0]?.price ?? price);
-  const xp = btoa(JSON.stringify({ from: buyer, amount }));
-  await fetch(url, { headers: { "x-payment": xp } }).catch(() => null);
+  await fetch(`${HUB}/testbuyer`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ url, verified }),
+  }).catch(() => null);
 }
 
 // Live testnet balance (HBAR) for the connected wallet, via the Hedera mirror
