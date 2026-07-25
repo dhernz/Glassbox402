@@ -33,6 +33,10 @@ const FACILITATOR = process.env.FACILITATOR_URL ?? "https://api.testnet.blocky40
 const flagAll = (n: string) => argv.reduce<string[]>((acc, a, i) => (a === `--${n}` && argv[i + 1] ? [...acc, argv[i + 1]] : acc), []);
 const customHeaders: Record<string, string> = {};
 for (const h of flagAll("header")) { const i = h.indexOf(":"); if (i > 0) customHeaders[h.slice(0, i).trim()] = h.slice(i + 1).trim(); }
+// --query "name=value" (repeatable) → secret query params injected into the upstream
+// URL (e.g. Etherscan/Alpha Vantage's ?apikey=), merged with the buyer's own query.
+const injectedQuery: Record<string, string> = {};
+for (const q of flagAll("query")) { const i = q.indexOf("="); if (i > 0) injectedQuery[q.slice(0, i).trim()] = q.slice(i + 1).trim(); }
 // how the test-buyer should call this API (GET, or POST a GraphQL query) — advertised to the dashboard.
 const sampleMethod = (flag("method", "GET") as string).toUpperCase();
 const sampleBody = flag("body");
@@ -107,7 +111,13 @@ app.use("*", paymentMiddleware(routes, x402Server));
 // proxy handler — our upstream key stays server-side ("reselling my access")
 app.all("*", async (c) => {
   const upstreamBase = new URL(upstream);
-  const url = upstreamBase.pathname !== "/" ? upstreamBase : new URL(c.req.path + (c.req.url.includes("?") ? "?" + c.req.url.split("?")[1] : ""), upstream);
+  // single-endpoint upstream (e.g. /api, /query) keeps its path; otherwise append the buyer's path.
+  const url = new URL(upstreamBase.pathname !== "/" ? upstreamBase.pathname : c.req.path, upstreamBase.origin);
+  // merge query params: upstream's own, then the buyer's, then our injected secrets (API key).
+  for (const [k, v] of upstreamBase.searchParams) url.searchParams.set(k, v);
+  const qs = c.req.url.includes("?") ? c.req.url.split("?").slice(1).join("?") : "";
+  for (const [k, v] of new URLSearchParams(qs)) url.searchParams.set(k, v);
+  for (const [k, v] of Object.entries(injectedQuery)) url.searchParams.set(k, v);
   const headers: Record<string, string> = { accept: "application/json", ...customHeaders };
   // Graph subgraph auth only for Graph upstreams — never leak a Bearer to other APIs (e.g. Tally).
   if (process.env.GRAPH_API_KEY && upstream.includes("thegraph.com") && !customHeaders.authorization && !customHeaders.Authorization) {

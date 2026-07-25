@@ -33,6 +33,7 @@ Options:
   --sample <path>     a valid GET path on the API (used by dashboards)           [/]
   --hub <url>         stream payments into a GlassBox402 dashboard             [none]
   --header "K: V"     upstream auth header, repeatable (e.g. "Api-Key: …")
+  --query "k=v"       upstream query param, repeatable (e.g. "apikey=…")
   --method <m>        how the test-buyer calls it: GET or POST                  [GET]
   --body <json>       request body for the test-buyer (e.g. a GraphQL query)
   --facilitator <url> override the facilitator URL
@@ -91,6 +92,9 @@ const hub = flag("hub", process.env.GLASSBOX_HUB);
 const flagAll = (n) => argv.reduce((acc, a, i) => (a === `--${n}` && argv[i + 1] ? [...acc, argv[i + 1]] : acc), []);
 const customHeaders = {};
 for (const h of flagAll("header")) { const i = h.indexOf(":"); if (i > 0) customHeaders[h.slice(0, i).trim()] = h.slice(i + 1).trim(); }
+// --query "name=value" (repeatable) → secret query params (e.g. ?apikey=) injected into the upstream, merged with the buyer's query.
+const injectedQuery = {};
+for (const q of flagAll("query")) { const i = q.indexOf("="); if (i > 0) injectedQuery[q.slice(0, i).trim()] = q.slice(i + 1).trim(); }
 // how the test-buyer should call this API (GET, or POST a GraphQL/JSON body).
 const sampleMethod = (flag("method", "GET")).toUpperCase();
 const sampleBody = flag("body");
@@ -141,7 +145,11 @@ app.use("*", paymentMiddleware(routes, x402Server));
 
 app.all("*", async (c) => {
   const base = new URL(upstream);
-  const url = base.pathname !== "/" ? base : new URL(c.req.path + (c.req.url.includes("?") ? "?" + c.req.url.split("?")[1] : ""), upstream);
+  const url = new URL(base.pathname !== "/" ? base.pathname : c.req.path, base.origin);
+  for (const [k, v] of base.searchParams) url.searchParams.set(k, v);
+  const qs = c.req.url.includes("?") ? c.req.url.split("?").slice(1).join("?") : "";
+  for (const [k, v] of new URLSearchParams(qs)) url.searchParams.set(k, v);
+  for (const [k, v] of Object.entries(injectedQuery)) url.searchParams.set(k, v);
   const headers = { accept: "application/json", ...customHeaders };
   let reqBody;
   if (c.req.method !== "GET" && c.req.method !== "HEAD") {

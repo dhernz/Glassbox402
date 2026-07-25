@@ -49,22 +49,76 @@ your API  ->  x402ify (wrap)  ->  @x402 paymentMiddleware  ->  blocky402 facilit
 - **World** human-verified pricing: callers who prove they are a real human (World ID) pay the base price, anonymous bots pay more.
 - **The Graph** a monetized Graph subgraph as one of the demo APIs (pay-per-query on-chain data).
 
+## Real APIs we x402ified
+
+These are not mocks. Each is a live third-party service that requires a key an autonomous agent cannot sign up for on its own. `x402ify` resells the operator's access per request, and the key never leaves the operator's machine.
+
+| API | What the buyer gets | Auth | How it settles |
+| --- | --- | --- | --- |
+| **Tally** | DAO governance data (chains, proposals) | GraphQL `POST` + `Api-Key` header | 0.01 HBAR / call → Hedera |
+| **The Graph** | Uniswap v3 subgraph (pools, TVL) | GraphQL `POST` + Bearer key | 0.02 HBAR / call → Hedera |
+| **Etherscan** | Ethereum on-chain data (V2 API) | `?apikey=` query param | 0.01 HBAR / call → Hedera |
+| **Alpha Vantage** | Equity market data (quotes) | `?apikey=` query param | 0.01 HBAR / call → Hedera |
+
+Every one of these was driven end to end: buyer pays over x402, gets the real upstream response, and the payment lands in the operator's Hedera wallet with a HashScan transaction. See [VALIDATION.md](./VALIDATION.md) for the evidence.
+
+## Business model
+
+**The operator earns the per-request x402 fee on whatever API they wrap.** That is the revenue, full stop. The buyer is not paying for "premium" access to a gated tier; they are paying the operator's per-call price to make the request at all.
+
+Wrapping keyed APIs an agent cannot sign up for (Tally, Etherscan, a paid subgraph) is simply one compelling reason a buyer is willing to pay, but the business is the per-call charge itself. Any operator with an API and a wallet becomes a seller in the agent economy in one command; GlassBox402 is the dashboard that makes that income visible and controllable.
+
+GlassBox402 monetizes as the control tower on top: a small take rate on settled volume, plus paid features (human-verified pricing, streaming, richer analytics, alerting) for operators running real traffic.
+
+## Hedera services used
+
+- **x402 settlement via the blocky402 facilitator** — the textbook Hedera x402 flow; every paid request is settled on Hedera testnet, no private key on the resource server.
+- **HBAR transfers** — payments move real testnet HBAR to the operator's payout account.
+- **Account lazy-create from a MetaMask address** — a judge connects a fresh `0x` EVM address; the first payment lazy-creates the matching Hedera account, resolvable on the mirror node.
+- **HashScan explorer links** — each settlement decodes to a real transaction id with a public HashScan link, so nothing in the UI has to be trusted.
+- **Mirror node** — used to resolve EVM addresses to Hedera accounts and read on-chain balances.
+- **Hedera Consensus Service (HCS)** — receipts can be written to an HCS topic as a permanent, ordered record of payments (`core/src/hedera.ts`).
+
+## Network impact for Hedera
+
+Every operator who runs `x402ify` turns an existing API into Hedera transaction volume, and every buyer is a new Hedera account and a stream of settled transactions. Because accounts lazy-create from MetaMask addresses, onboarding an EVM-native user to Hedera is a side effect of their first payment, not a separate step. The pattern scales linearly: more wrapped APIs and more agent calls both translate directly into Hedera account creation and TPS.
+
+## Roadmap
+
+- **Mainnet settlement** and a hosted `x402ify` so operators do not run their own process.
+- **More auth patterns** out of the box (OAuth token refresh, signed requests, per-route pricing).
+- **Payout routing** — split revenue between the API owner and the operator, or to a treasury.
+- **Alerting and budgets** — notify on income spikes, anomalous callers, or a lane going down.
+- **Marketplace listing** — publish x402ified APIs to a public directory agents can discover.
+
+## Go to market
+
+Start where the pain is sharpest: developers who already sell data or compute and want agent revenue without building a metering and billing stack. `x402ify` is the free, published wedge (`npx x402ify …`); the dashboard is the reason they stay. Land individual operators through the x402 and agent-tooling communities, then expand to teams running multiple monetized endpoints who need the analytics and controls.
+
 ## Run it locally
 
 ```bash
 pnpm install
-cp .env.example .env    # add your Hedera testnet operator account (signs the demo buyer's payments)
+cp .env.example .env    # add your Hedera testnet operator account + the API keys
 
+# one command: hub + 4 real x402ified APIs + the dashboard
+./demo.sh
+```
+
+That launches the hub, wraps all four real APIs (Tally, The Graph, Etherscan, Alpha Vantage), and opens the dashboard on http://localhost:5173. Connect MetaMask and click "send test buyer" on any API to drive a real payment, or open the buyer playground at http://localhost:5173?app=buyer to shop the market as an agent.
+
+To wrap a single API by hand and stream it in:
+
+```bash
 # terminal 1 - the hub + the dashboard
 pnpm --filter @glassbox/core exec tsx src/hub.ts
 pnpm --filter @glassbox/lens dev                 # http://localhost:5173
 
 # terminal 2 - wrap any API and stream it into the dashboard
-npx x402ify https://api.coinbase.com --price 0.01 \
-  --wallet 0xYourWallet --sample /v2/prices/ETH-USD/spot --hub http://localhost:4021
+npx x402ify https://api.etherscan.io/v2/api --price 0.01 \
+  --wallet 0xYourWallet --query "apikey=$ETHERSCAN_KEY" \
+  --sample '/?chainid=1&module=stats&action=ethprice' --hub http://localhost:4021
 ```
-
-Open the dashboard, connect your wallet, and click "send test buyer" to drive a real payment.
 
 ## Repo layout
 
