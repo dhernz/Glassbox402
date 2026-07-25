@@ -2,6 +2,8 @@
 
 > **Google Analytics for x402.** Wrap any API in one command, then watch it earn on Hedera.
 
+**Live: [glassbox402-production.up.railway.app](https://glassbox402-production.up.railway.app)** — connect any wallet. If Hedera has never seen the address, connecting creates the account for you.
+
 The agent economy runs on [x402](https://x402.org): APIs that charge AI agents tiny per-request payments in crypto, with no accounts and no API keys. GlassBox402 is two things:
 
 1. **[`x402ify`](https://www.npmjs.com/package/x402ify)** (published on npm) a single command that wraps ANY API with x402 pay-per-call.
@@ -114,14 +116,15 @@ cp .env.example .env    # add your Hedera testnet operator account + the API key
 ./demo.sh
 ```
 
-That launches the hub, wraps all four real APIs (Tally, The Graph, Etherscan, Alpha Vantage), and opens the dashboard on http://localhost:5173. Connect MetaMask and click "send test buyer" on any API to drive a real payment, or open the buyer playground at http://localhost:5173?app=buyer to shop the market as an agent.
+That launches the hub, wraps all four real APIs (Tally, The Graph, Etherscan, Alpha Vantage), and opens the dashboard on http://localhost:4021. Connect MetaMask and click "send test buyer" on any API to drive a real payment, or open the buyer playground at http://localhost:4021?app=buyer to shop the market as an agent.
+
+Everything is one port: the hub serves the dashboard as well as the API and the websocket, so local and production run the identical code path.
 
 To wrap a single API by hand and stream it in:
 
 ```bash
 # terminal 1 - the hub + the dashboard
-pnpm --filter @glassbox/core exec tsx src/hub.ts
-pnpm --filter @glassbox/lens dev                 # http://localhost:5173
+pnpm --filter @glassbox/core exec tsx src/serve.ts   # http://localhost:4021
 
 # terminal 2 - wrap any API and stream it into the dashboard
 npx x402ify https://api.etherscan.io/v2/api --price 0.01 \
@@ -129,12 +132,26 @@ npx x402ify https://api.etherscan.io/v2/api --price 0.01 \
   --sample '/?chainid=1&module=stats&action=ethprice' --hub http://localhost:4021
 ```
 
+## Sell another API
+
+Add an entry to [`lanes.json`](./lanes.json) and put its key in `.env` (or in Railway). `core/src/serve.ts` starts a gateway per entry, and the dashboard picks it up the moment it registers. A lane whose key is missing is skipped with a warning rather than started — a gateway with no upstream key would still take the buyer's HBAR and then fail.
+
+## Deploy
+
+```bash
+railway up          # one container: hub + every lane in lanes.json
+```
+
+The `Dockerfile` builds the dashboard and hands off to `core/src/serve.ts`. Set the same variables as `.env`, plus `WALLET` and `WORLD_TOKEN_SECRET` (without the latter the session-token HMAC falls back to a public dev secret). Keep `HEDERA_TOPIC_ID` set or every redeploy opens a fresh HCS receipt topic.
+
 ## Repo layout
 
 ```
 packages/x402ify/   the published npm package (wrap any API)
 core/               the hub (events, analytics, facilitator glue) and the gateway
 lens/               the dashboard (React + the functor design system)
+lanes.json          every API being sold — add one line to sell another
+Dockerfile          one container: hub + all lanes, one public port
 ```
 
 ## License
