@@ -123,3 +123,4 @@ a.tx.hedera:hover { text-decoration: underline; }
 .rdot.active { background: var(--gold); box-shadow: 0 0 8px var(--gold); }
 .replay-controls { display: flex; gap: 10px; }
 .replay-controls button { background: none; border: 1px solid var(--edge); color: var(--text); border-radius: 6px; padding: 6px 12px; cursor: pointer; font-family: inherit; }
+.zerog { color: #8b7bff; margin-left: 6px; }

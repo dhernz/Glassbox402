@@ -9,6 +9,7 @@
 
 import { paidFetch } from "./paid-fetch.js";
 import { emit, gbe, HUB_URL } from "./events.js";
+import { zeroGDecide, zeroGReady } from "./zerog.js";
 
 const WALLET = process.env.WALLET ?? "0xWATCHER";
 const BROKE = process.env.BROKE === "1";
@@ -78,9 +79,15 @@ async function tick() {
   if (lastPrice != null) {
     const move = Math.abs(price - lastPrice) / lastPrice;
     if (move >= THRESHOLD) {
-      const msg = `ETH ${(move * 100).toFixed(3)}% → $${price.toFixed(2)} · this call cost $${spent.toFixed(3)} of paid data (${looks} looks)`;
+      // the decision itself runs on 0G Compute (decentralized inference)
+      let decision: string | undefined, model: string | undefined, tokens: number | undefined;
+      if (zeroGReady()) {
+        const z = await zeroGDecide(`ETH moved ${(move * 100).toFixed(2)}% to $${price.toFixed(2)} in seconds. Reply with ONE word only: BUY, SELL, or HOLD.`);
+        if (z) { decision = z.decision; model = z.model; tokens = z.tokens; console.log(`  🧠 0G Compute (${z.model}): ${z.decision}`); }
+      }
+      const msg = `ETH ${(move * 100).toFixed(3)}% → $${price.toFixed(2)}${decision ? ` · 0G says ${decision}` : ""} · this call cost $${spent.toFixed(3)} of paid data (${looks} looks)`;
       console.log(`📡 SIGNAL: ${msg}`);
-      await emit(gbe("signal", "watcher", crypto.randomUUID(), { msg, price, move, spent, looks }));
+      await emit(gbe("signal", "watcher", crypto.randomUUID(), { msg, price, move, spent, looks, decision, model, tokens }));
       spent = 0; looks = 0;
     }
   }

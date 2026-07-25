@@ -118,7 +118,12 @@ export default function App() {
     <div className="app">
       <TopBar earned={totalEarned} count={totalCount} sound={sound} setSound={setSound} connected={connected} />
       <Hero feed={feed} />
-      {signals[0] && <div className="signal" key={signals[0].id}>📡 <b>SIGNAL</b> {String(signals[0].data.msg)}</div>}
+      {signals[0] && (
+        <div className="signal" key={signals[0].id}>
+          📡 <b>SIGNAL</b> {String(signals[0].data.msg)}
+          {signals[0].data.model ? <span className="zerog"> 🧠 decided on 0G Compute · {String(signals[0].data.model)} · {String(signals[0].data.tokens)} tok</span> : null}
+        </div>
+      )}
       <div className="main">
         <div className="floor">
           <div className="floor-title">EVERY PAYMENT · click to replay</div>
