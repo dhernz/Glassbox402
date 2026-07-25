@@ -174,6 +174,12 @@ const server = createServer(async (req, res) => {
     if (req.method === "POST" && url.pathname === "/world/verify") {
       const { proof, wallet } = await readBody(req);
       if (worldLive()) {
+        // Selfie Check is beta and the payload shape isn't pinned down in the
+        // docs, so log what actually arrived — this is the only way to tell a
+        // rejected proof from one we failed to parse.
+        console.log("world: proof received, keys =", proof && Object.keys(proof),
+          proof?.verification_level ? `| level=${proof.verification_level}` : "",
+          Array.isArray(proof?.responses) ? `| responses=${proof.responses.map((r: any) => r.identifier).join(",")}` : "");
         const v = await verifyWorldProof(proof);
         if (!v.ok) return json(res, 200, { ok: false, error: v.error });
         return json(res, 200, { ok: true, token: issueSessionToken(v.nullifier!, false), simulated: false });

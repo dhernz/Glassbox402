@@ -116,28 +116,59 @@ export async function rpContext(action = ACTION) {
  *  the session token to. */
 export async function verifyWorldProof(result: any): Promise<{ ok: boolean; nullifier?: string; error?: string }> {
   if (!worldLive()) return { ok: false, error: "world_not_configured" };
-  if (!Array.isArray(result?.responses) || result.responses.length === 0) {
+
+  // The widget can hand back either shape, and the *Legacy presets (Selfie Check,
+  // orbLegacy) return the 3.0 one — so requiring `responses[]` rejects a perfectly
+  // good selfie proof before it ever reaches World. Unwrap common nestings too.
+  const p = result?.responses || result?.merkle_root ? result
+    : (result?.result ?? result?.payload ?? result?.proof_payload ?? result);
+  const is40 = Array.isArray(p?.responses) && p.responses.length > 0;
+  const is30 = !!(p?.proof && (p?.nullifier_hash || p?.merkle_root));
+  if (!is40 && !is30) {
+    console.error("world: unrecognised proof payload, keys =", p && Object.keys(p));
     return { ok: false, error: "malformed_proof" };
   }
-  try {
-    const r = await fetch(`https://developer.world.org/api/v4/verify/${RP_ID}`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        protocol_version: result.protocol_version ?? "4.0",
-        nonce: result.nonce,
-        action: result.action ?? ACTION,
-        environment: result.environment,
-        responses: result.responses,
-        user_presence_completed: result.user_presence_completed,
-      }),
-    });
-    const j: any = await r.json().catch(() => ({}));
-    if (r.ok && j?.success === true) {
-      return { ok: true, nullifier: j.nullifier ?? result.responses[0]?.nullifier };
+
+  // The 4.0 endpoint verifies legacy 3.0 proofs too, so both go to the same place.
+  const body = is40
+    ? {
+        protocol_version: p.protocol_version ?? "4.0",
+        nonce: p.nonce,
+        action: p.action ?? ACTION,
+        environment: p.environment,
+        responses: p.responses,
+        user_presence_completed: p.user_presence_completed,
+      }
+    : {
+        nullifier_hash: p.nullifier_hash,
+        merkle_root: p.merkle_root,
+        proof: p.proof,
+        verification_level: p.verification_level,
+        signal_hash: p.signal_hash,
+        action: p.action ?? ACTION,
+      };
+
+  const attempts: Array<[string, any]> = [[`https://developer.world.org/api/v4/verify/${RP_ID}`, body]];
+  // legacy fallback: the 3.0 endpoint is keyed by app_id, not rp_id
+  if (is30 && APP_ID) attempts.push([`https://developer.worldcoin.org/api/v2/verify/${APP_ID}`, body]);
+
+  let lastError = "verify_failed";
+  for (const [url, payload] of attempts) {
+    try {
+      const r = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const j: any = await r.json().catch(() => ({}));
+      if (r.ok && j?.success === true) {
+        return { ok: true, nullifier: j.nullifier ?? p.nullifier_hash ?? p.responses?.[0]?.nullifier };
+      }
+      lastError = j?.code ?? j?.detail ?? `verify_failed_${r.status}`;
+      console.error("world: verify rejected by", url, "→", JSON.stringify(j).slice(0, 300));
+    } catch (e) {
+      lastError = String(e).split("\n")[0];
     }
-    return { ok: false, error: j?.code ?? j?.detail ?? `verify_failed_${r.status}` };
-  } catch (e) {
-    return { ok: false, error: String(e).split("\n")[0] };
   }
+  return { ok: false, error: lastError };
 }
