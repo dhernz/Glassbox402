@@ -1,0 +1,27 @@
+{
+  "name": "@glassbox/core",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "bin": {
+    "x402ify": "src/x402ify.ts"
+  },
+  "scripts": {
+    "hub": "tsx src/hub.ts",
+    "x402ify": "tsx src/x402ify.ts",
+    "watcher": "tsx src/watcher.ts"
+  },
+  "dependencies": {
+    "@hashgraph/sdk": "^2.81.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "viem": "^2.55.8",
+    "ws": "^8.18.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/ws": "^8.5.13",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

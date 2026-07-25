@@ -1,0 +1,15 @@
+{
+  "name": "glassbox402",
+  "private": true,
+  "version": "0.0.1",
+  "description": "GlassBox402 v0 spike — x402 in one command, with a screen. THROWAWAY REHEARSAL CODE: not for ETHGlobal submission.",
+  "scripts": {
+    "hub": "pnpm --filter @glassbox/core hub",
+    "lens": "pnpm --filter @glassbox/lens dev",
+    "watcher": "pnpm --filter @glassbox/core watcher",
+    "broke": "BROKE=1 WALLET=0xBROKE pnpm --filter @glassbox/core watcher",
+    "test:e2e": "node test/e2e.mjs",
+    "verify": "node --env-file=.env test/verify.mjs",
+    "hedera:test": "pnpm --filter @glassbox/core exec tsx ../test/hedera-live.mjs"
+  }
+}
