@@ -6,6 +6,7 @@
 //     (demo insurance: if the venue wifi dies, the tape still plays)
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createConnection } from "node:net";
 import { appendFileSync, readFileSync } from "node:fs";
 import { WebSocketServer, WebSocket } from "ws";
 import { HUB_PORT, type GBEvent } from "./events.js";
@@ -40,6 +41,18 @@ function broadcast(ev: GBEvent, record = true) {
   for (const client of wss.clients) {
     if (client.readyState === WebSocket.OPEN) client.send(msg);
   }
+}
+
+// quick TCP liveness check for a lane's local port
+function portAlive(port: number, timeout = 350): Promise<boolean> {
+  return new Promise((resolve) => {
+    const sock = createConnection({ port, host: "127.0.0.1" });
+    const done = (ok: boolean) => { sock.destroy(); resolve(ok); };
+    sock.setTimeout(timeout);
+    sock.once("connect", () => done(true));
+    sock.once("timeout", () => done(false));
+    sock.once("error", () => done(false));
+  });
 }
 
 async function readBody(req: IncomingMessage): Promise<any> {
@@ -85,7 +98,12 @@ const server = createServer(async (req, res) => {
       return json(res, 200, { ok: true, txHash, balance: balances.get(from) });
     }
     if (url.pathname === "/lanes") {
-      return json(res, 200, { lanes: [...lanes.values()] });
+      // self-healing directory: only return lanes whose gateway is still listening,
+      // and prune dead ones so a closed terminal / crash doesn't break the demo.
+      const entries = [...lanes.entries()];
+      const checks = await Promise.all(entries.map(async ([name, l]) => ({ name, l, alive: await portAlive(Number(l.port)) })));
+      for (const c of checks) if (!c.alive) lanes.delete(c.name);
+      return json(res, 200, { lanes: checks.filter((c) => c.alive).map((c) => c.l) });
     }
     if (url.pathname === "/analytics") {
       return json(res, 200, analytics.snapshot());
