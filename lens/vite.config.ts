@@ -22,7 +22,16 @@ const wasmMime = {
   },
 };
 
+// The app talks to its own origin (see lens/src/hub.ts), because in production
+// the hub serves this bundle. `vite dev` is the one place that isn't true, so
+// proxy the hub's routes — including the websocket — back to :4021.
+const HUB_ROUTES =
+  "^/(ws|status|lanes|analytics|balances|policy|testbuyer|account|world|faucet|event|settle)";
+
 export default defineConfig({
   plugins: [react(), wasmMime],
-  server: { port: 5173 },
+  server: {
+    port: 5173,
+    proxy: { [HUB_ROUTES]: { target: "http://localhost:4021", ws: true } },
+  },
 });

@@ -30,8 +30,11 @@ export interface GBEvent {
   data: Record<string, unknown>;
 }
 
-export const HUB_PORT = 4021;
-export const HUB_URL = process.env.GB_HUB ?? `http://localhost:${HUB_PORT}`;
+// PORT is what a PaaS (Railway) hands us; 4021 stays the local default so
+// nothing about the laptop flow changes. Lanes reach the hub over loopback —
+// they share a container with it — and GB_HUB overrides that if they ever don't.
+export const HUB_PORT = Number(process.env.PORT ?? 4021);
+export const HUB_URL = process.env.GB_HUB ?? `http://127.0.0.1:${HUB_PORT}`;
 
 export function gbe(
   type: GBEventType,

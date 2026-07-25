@@ -16,6 +16,7 @@ import { HUB_PORT, gbe, type GBEvent } from "./events.js";
 import { Analytics } from "./analytics.js";
 import { verifyWorldProof, issueSessionToken, rpContext, worldLive, WORLD_MODE } from "./world.js";
 import { hederaEnabled, ensureTopic, hederaReceipt } from "./hedera.js";
+import { serveStatic, distAvailable } from "./static.js";
 
 // ./hedera.js reads the operator credentials lazily, inside its functions, so
 // loading them here — after the hoisted imports have run — is early enough.
@@ -24,6 +25,11 @@ loadEnv();
 const args = process.argv.slice(2);
 const replayFile = args.includes("--replay") ? args[args.indexOf("--replay") + 1] : null;
 const tapeFile = args.includes("--tape") ? args[args.indexOf("--tape") + 1] : "tape.jsonl";
+// A committed session of past payments, hydrated at boot before the live tape.
+// Without it a fresh deploy opens on an empty dashboard — zero income, no
+// history — which reads as broken rather than new. The seed is never written
+// to, so hydrating it can't double-count however many times we restart.
+const seedFile = args.includes("--seed") ? args[args.indexOf("--seed") + 1] : null;
 
 const balances = new Map<string, number>(); // wallet -> USD
 const earnings = new Map<string, number>(); // payTo -> USD
@@ -238,10 +244,23 @@ const server = createServer(async (req, res) => {
         earnings: Object.fromEntries(earnings),
       });
     }
-    return json(res, 200, {
+    // Canonical status route. It used to live on "/", which now has to serve the
+    // dashboard instead — see the Accept shim below.
+    const status = {
       ok: true, service: "glassbox-hub", mode: replayFile ? "replay" : "live",
       hcsTopic, hcsTopicUrl: hcsTopic ? `https://hashscan.io/testnet/topic/${hcsTopic}` : null,
-    });
+    };
+    if (url.pathname === "/status") return json(res, 200, status);
+
+    // "/" is ambiguous: a browser wants the app, but test/e2e.mjs's readiness
+    // poll, serve.ts's readiness poll and the curl in the README all want the
+    // JSON. Browsers send `Accept: text/html,...`; curl and fetch() send `*/*`.
+    if (url.pathname === "/" && !(req.headers.accept ?? "").includes("text/html")) {
+      return json(res, 200, status);
+    }
+
+    if (serveStatic(req, res, url.pathname)) return;
+    return json(res, 200, status);
   } catch (e) {
     return json(res, 500, { ok: false, error: String(e) });
   }
@@ -256,6 +275,9 @@ server.on("upgrade", (req, socket, head) => {
 
 server.listen(HUB_PORT, () => {
   console.log(`⚡ glassbox hub on :${HUB_PORT}  (tape: ${replayFile ? `REPLAY ${replayFile}` : tapeFile})`);
+  console.log(distAvailable()
+    ? `🖥️  serving the dashboard from lens/dist`
+    : `🖥️  no lens/dist — run \`vite build\` or the dashboard won't be served`);
   if (replayFile) startReplay(replayFile);
   else hydrateFromTape();
   // Open the receipt topic now, so the first payment of the demo isn't the one
@@ -279,10 +301,15 @@ server.listen(HUB_PORT, () => {
 // aggregates and nothing else. Lanes are filtered later, at /analytics, because
 // gateways only register themselves after the hub is already up.
 function hydrateFromTape() {
-  if (!existsSync(tapeFile)) return;
+  if (seedFile) hydrate(seedFile, "seed");
+  hydrate(tapeFile, "tape");
+}
+
+function hydrate(file: string, label: string) {
+  if (!existsSync(file)) return;
   let payments = 0, policyEvents = 0;
   try {
-    for (const line of readFileSync(tapeFile, "utf8").split("\n")) {
+    for (const line of readFileSync(file, "utf8").split("\n")) {
       if (!line) continue;
       let ev: GBEvent;
       try { ev = JSON.parse(line); } catch { continue } // a half-written last line is normal
@@ -290,10 +317,10 @@ function hydrateFromTape() {
       else if (ev.type === "policy") { policies.set(ev.lane, ev.data); policyEvents++; }
     }
   } catch (e) {
-    return console.error("tape hydrate failed:", String(e).split("\n")[0]);
+    return console.error(`${label} hydrate failed:`, String(e).split("\n")[0]);
   }
   if (payments || policyEvents) {
-    console.log(`📊 hydrated ${payments} payments + ${policyEvents} policy changes from ${tapeFile}`);
+    console.log(`📊 hydrated ${payments} payments + ${policyEvents} policy changes from ${label} (${file})`);
   }
 }
 

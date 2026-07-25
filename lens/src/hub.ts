@@ -1,9 +1,17 @@
 // hub.ts — the Lens's view of the GlassBox402 backend.
 // Types mirror core/src/events.ts + analytics.ts. All HTTP/WS talks to the
-// hub on :4021; the one external call allowed is the Hedera mirror node.
+// hub, which serves this bundle too; the one external call allowed is the
+// Hedera mirror node.
 
-export const HUB = "http://localhost:4021";
-export const HUB_WS = "ws://localhost:4021";
+// Same origin, always. The hub serves lens/dist, so every API path is relative
+// and the websocket follows the page's scheme — which is what makes this work
+// on https without mixed-content blocking. `vite dev` gets there via the proxy
+// in vite.config.ts, so dev, ./demo.sh and production are one code path and the
+// wasm/MIME behaviour is identical in all three.
+// The hub upgrades on any path, so /ws is purely so `vite dev` has something
+// specific to proxy — connecting at "/" would collide with the page itself.
+export const HUB = "";
+export const HUB_WS = `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/ws`;
 export const MIRROR = "https://testnet.mirrornode.hedera.com/api/v1";
 
 // Demo seller = Hedera account 0.0.9742887 (EVM address 0xcca7…dd55). Payments
@@ -149,7 +157,7 @@ export const api = {
   analytics: () => jget<Analytics>("/analytics"),
   // the receipt topic exists before any payment does, so the link can be shown
   // from a cold start rather than only after the first settlement
-  status: () => jget<{ hcsTopic: string | null; hcsTopicUrl: string | null }>("/"),
+  status: () => jget<{ hcsTopic: string | null; hcsTopicUrl: string | null }>("/status"),
   getPolicy: (lane: string) => jget<{ policy: Policy }>(`/policy/${encodeURIComponent(lane)}`).then((r) => r.policy ?? {}),
   setPolicy: async (lane: string, patch: Partial<Policy>) => {
     const r = await fetch(`${HUB}/policy/${encodeURIComponent(lane)}`, {

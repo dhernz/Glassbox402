@@ -1,0 +1,56 @@
+{
+  "_comment": [
+    "Every x402ified API, in one place. To sell a new API: add an object here,",
+    "set its key as an env var (locally in .env, in production in Railway), and",
+    "restart. Nothing else changes — core/src/serve.ts spawns one gateway per",
+    "entry and the dashboard picks it up from the lane_up event.",
+    "",
+    "${VAR} is read from the environment at spawn time. A lane whose vars are",
+    "missing is SKIPPED with a warning rather than started, because a gateway",
+    "with no upstream key still takes the buyer's HBAR and then returns a 401.",
+    "",
+    "Fields map 1:1 onto core/src/x402ify.ts flags:",
+    "  name/price/port/sample/method/body -> --name --price --port --sample --method --body",
+    "  headers{} -> repeated --header 'K: V'   query{} -> repeated --query 'k=v'",
+    "price is in HBAR per call; payouts go to the top-level wallet."
+  ],
+
+  "wallet": "${WALLET}",
+
+  "lanes": [
+    {
+      "name": "tally",
+      "upstream": "https://api.tally.xyz/query",
+      "price": 0.01,
+      "port": 4097,
+      "method": "POST",
+      "body": "{\"query\":\"query { chains { id name } }\"}",
+      "headers": { "Api-Key": "${TALLY_API_KEY}" }
+    },
+    {
+      "name": "uniswap-data",
+      "upstream": "https://gateway.thegraph.com/api/subgraphs/id/5zvR82QoaXYFyDEKLZ9t6v9adgnptxYpKpSbxtgVENFV",
+      "price": 0.02,
+      "port": 4098,
+      "method": "POST",
+      "body": "{\"query\":\"{ pools(first:3, orderBy:totalValueLockedUSD, orderDirection:desc){ id totalValueLockedUSD } }\"}",
+      "headers": { "Authorization": "Bearer ${GRAPH_API_KEY}" }
+    },
+    {
+      "name": "etherscan",
+      "upstream": "https://api.etherscan.io/v2/api",
+      "price": 0.01,
+      "port": 4095,
+      "sample": "/?chainid=1&module=stats&action=ethprice",
+      "query": { "apikey": "${ETHERSCAN_KEY}" }
+    },
+    {
+      "name": "alphavantage",
+      "upstream": "https://www.alphavantage.co/query",
+      "price": 0.01,
+      "port": 4094,
+      "sample": "/?function=GLOBAL_QUOTE&symbol=IBM",
+      "query": { "apikey": "${ALPHAVANTAGE_KEY}" }
+    }
+  ]
+}

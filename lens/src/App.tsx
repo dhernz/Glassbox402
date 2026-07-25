@@ -1134,7 +1134,7 @@ function Settings({ wallet, balance, onDisconnect }: { wallet: string; balance: 
         </div>
         <div className="set-row">
           <div className="set-k">Facilitator<div className="sub">x402 payment facilitator endpoint</div></div>
-          <div className="set-v"><span className="keyfield">localhost:4021</span></div>
+          <div className="set-v"><span className="keyfield">api.testnet.blocky402.com</span></div>
         </div>
       </div>
 
@@ -1396,7 +1396,7 @@ function BuyerPlayground() {
           <div className="section-label" style={{ marginBottom: 12 }}>Directory · {lanes.length} API{lanes.length === 1 ? "" : "s"}</div>
 
           <div className="pay-any">
-            <input className="input mono" placeholder="pay any x402 URL — http://localhost:4090/jokes/random"
+            <input className="input mono" placeholder="pay any x402 URL — https://api.example.com/data"
               value={customUrl} spellCheck={false} onChange={(e) => setCustomUrl(e.target.value)} />
             <label className="pay-any-verified">
               <label className="switch" style={{ width: 36, height: 22 }}>
