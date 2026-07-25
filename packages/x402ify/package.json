@@ -1,0 +1,41 @@
+{
+  "name": "x402ify",
+  "version": "0.1.0",
+  "description": "Wrap any API with x402 pay-per-call. One command, no code, no key on the server. Chain-agnostic: settle on Hedera, Base, or Solana.",
+  "type": "module",
+  "bin": {
+    "x402ify": "index.mjs"
+  },
+  "files": [
+    "index.mjs",
+    "README.md"
+  ],
+  "keywords": [
+    "x402",
+    "payments",
+    "micropayments",
+    "api",
+    "agentic",
+    "pay-per-use",
+    "hedera",
+    "base",
+    "solana"
+  ],
+  "author": "dhernz",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dhernz/Glassbox402"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.13.0",
+    "@x402/core": "^2.19.0",
+    "@x402/evm": "^2.19.0",
+    "@x402/hedera": "^2.19.0",
+    "@x402/hono": "^2.19.0",
+    "hono": "^4.6.0"
+  }
+}

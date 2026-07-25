@@ -21,7 +21,9 @@ const flag = (n: string, d?: string) => { const i = argv.indexOf(`--${n}`); retu
 if (!upstream) { console.error("usage: x402ify <url> --price 0.01 --wallet 0.0.x [--name] [--port] [--sample]"); process.exit(1); }
 
 const priceHbar = Number(flag("price", "0.01"));
-const payTo = flag("wallet") ?? flag("pay-to") ?? "0.0.9742887";
+// your payout account — never hardcoded; every payment settles here.
+const payTo = flag("wallet") ?? flag("pay-to");
+if (!payTo) { console.error("--wallet <your Hedera account, e.g. 0.0.1234> is required (payouts go here)"); process.exit(1); }
 const lane = flag("name", new URL(upstream).hostname.replace(/^api\./, "").split(".")[0])!;
 const port = Number(flag("port", "4030"));
 const sample = flag("sample", "/")!;
