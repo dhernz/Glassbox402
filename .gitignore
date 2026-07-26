@@ -4,3 +4,5 @@ dist/
 tape.jsonl
 .env
 .gstack/
+signing-key-*.json
+*.pem

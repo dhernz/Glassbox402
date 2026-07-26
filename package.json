@@ -2,7 +2,7 @@
   "name": "glassbox402",
   "private": true,
   "version": "0.0.1",
-  "description": "GlassBox402 v0 spike — x402 in one command, with a screen. THROWAWAY REHEARSAL CODE: not for ETHGlobal submission.",
+  "description": "Convert any API into an x402. Track it all in one place.",
   "scripts": {
     "hub": "pnpm --filter @glassbox/core hub",
     "lens": "pnpm --filter @glassbox/lens dev",
