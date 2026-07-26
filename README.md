@@ -2,7 +2,7 @@
 
 > **Convert any API into an x402. Track it all in one place.**
 
-**Live: [glassbox402-production.up.railway.app](https://glassbox402-production.up.railway.app)** — connect any wallet. If Hedera has never seen the address, connecting creates the account for you.
+**Live: [glassbox402-production.up.railway.app](https://glassbox402-production.up.railway.app)** — 
 
 Built at ETHGlobal Lisbon 2026.
 
