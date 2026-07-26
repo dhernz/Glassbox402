@@ -226,10 +226,10 @@ consequence explicitly (unverified callers pay 10×) rather than leaving the use
 
 ## 4. Working prototype
 
-- **Buyer playground** (`http://localhost:5173?app=buyer`) — the agent-side market. Verify
+- **Buyer playground** (`http://localhost:4021?app=buyer`) — the agent-side market. Verify
   with World ID, then buy from a real API; each purchase shows the real upstream response
   and its Hedera settlement transaction.
-- **Seller dashboard** (`http://localhost:5173`) — the operator toggles
+- **Seller dashboard** (`http://localhost:4021`) — the operator toggles
   "Require human-verified callers" per API and sets the bot multiplier.
 - **Run it:** `./demo.sh` (needs `.env` — see `.env.example` for the World variables).
 
