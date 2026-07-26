@@ -161,6 +161,11 @@ function Dashboard({ wallet, onDisconnect }: { wallet: string; onDisconnect: () 
   const connectedAt = useRef(0);
   const toastId = useRef(1);
   const freshTimers = useRef<Map<string, number>>(new Map());
+  // The connected wallet's identities, readable from inside the polling loop.
+  // The loop runs on a fixed interval and can't take `aliases` as a dependency:
+  // every poll hands back a new lanes Map, which would rebuild the memo and
+  // restart the interval on every tick. Kept in a ref instead.
+  const aliasRef = useRef<Set<string>>(new Set());
 
   const pushToast = useCallback((text: string, kind: Toast["kind"] = "success") => {
     const id = toastId.current++;
@@ -299,11 +304,18 @@ function Dashboard({ wallet, onDisconnect }: { wallet: string; onDisconnect: () 
   useEffect(() => {
     let stop = false;
     const pull = async () => {
-      const [ls, an, st] = await Promise.all([
+      const [ls, st] = await Promise.all([
         api.lanes().catch(() => []),
-        api.analytics().catch(() => null),
         api.status().catch(() => null),
       ]);
+      if (stop) return;
+      // Analytics is scoped to the lanes THIS wallet owns — without that, a
+      // wallet that has never sold anything opened on the previous operator's
+      // traffic. Derived from the response we just got rather than from the
+      // `myLanes` memo below, so even the first poll is already scoped.
+      const owned = (a?: string) => !!a && aliasRef.current.has(a.toLowerCase());
+      const mine = ls.filter((l) => owned(l.owner) || owned(l.payTo)).map((l) => l.name);
+      const an = await api.analytics(mine).catch(() => null);
       if (stop) return;
       if (st?.hcsTopicUrl) setHcsTopicUrl(st.hcsTopicUrl);
       if (ls.length) {
@@ -366,6 +378,10 @@ function Dashboard({ wallet, onDisconnect }: { wallet: string; onDisconnect: () 
     () => new Set(walletAliases(wallet, account?.accountId).map((a) => a.toLowerCase())),
     [wallet, account?.accountId],
   );
+  // Assigned during render, not in an effect: the polling loop above is declared
+  // first and would therefore run its first pull against an empty set, showing a
+  // blank Analytics tab for a beat even to the operator who owns every lane.
+  aliasRef.current = aliases;
   const isMine = useCallback((addr?: string) => !!addr && aliases.has(addr.toLowerCase()), [aliases]);
   const myLanes = useMemo(
     () => [...lanes.values()].filter((l) => isMine(l.owner) || isMine(l.payTo)),
@@ -999,7 +1015,9 @@ function AnalyticsView({ a, myLanes, selected, onSelect }: {
         <div className="empty-state">
           {laneLabel
             ? <>No traffic on <span className="mono">{laneLabel}</span> yet. Its payments appear here once they settle.</>
-            : "No traffic yet. Once payments settle, the distributions appear here."}
+            : myLanes.length === 0
+              ? "No APIs connected to this wallet yet. x402ify one and every call it sells shows up here."
+              : "No traffic yet. Once payments settle, the distributions appear here."}
         </div>
       ) : (
         <div className="analytics-grid">

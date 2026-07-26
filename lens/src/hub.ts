@@ -167,7 +167,11 @@ async function jget<T>(path: string): Promise<T> {
 
 export const api = {
   lanes: () => jget<{ lanes: Lane[] }>("/lanes").then((r) => r.lanes),
-  analytics: () => jget<Analytics>("/analytics"),
+  // `lanes` scopes the numbers to the APIs the connected wallet owns. Passing an
+  // empty array asks for an empty snapshot — exactly right for a wallet with no
+  // APIs yet. Omitting it means "every live lane" (curl/debug).
+  analytics: (lanes?: string[]) =>
+    jget<Analytics>(lanes ? `/analytics?lanes=${encodeURIComponent(lanes.join(","))}` : "/analytics"),
   // the receipt topic exists before any payment does, so the link can be shown
   // from a cold start rather than only after the first settlement
   status: () => jget<{ hcsTopic: string | null; hcsTopicUrl: string | null }>("/status"),

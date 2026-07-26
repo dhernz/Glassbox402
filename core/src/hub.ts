@@ -170,7 +170,17 @@ const server = createServer(async (req, res) => {
       // Scoped to the lanes that are actually up: `lanes` is pruned by /lanes,
       // so a dead API drops out of analytics exactly as it drops out of the API
       // list — and history for a lane that no longer exists never resurfaces.
-      return json(res, 200, analytics.snapshot([...lanes.keys()]));
+      //
+      // ?lanes= narrows it further to the caller's own APIs. The dashboard sends
+      // the lanes the connected wallet owns, so a freshly connected wallet opens
+      // on an empty Analytics page instead of on the numbers of whoever was
+      // selling on this hub before. An EMPTY value means "I own nothing" and
+      // yields an empty snapshot; an ABSENT param still means "every live lane",
+      // which is what the README curl and the CLI expect.
+      const want = url.searchParams.get("lanes");
+      const live = [...lanes.keys()];
+      const keys = want == null ? live : live.filter((k) => want.split(",").includes(k));
+      return json(res, 200, analytics.snapshot(keys));
     }
     // World ID: verify the buyer ONCE, then hand back a short-lived signed token
     // they present per request. The gateway checks the signature locally, so the
