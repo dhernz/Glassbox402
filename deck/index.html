@@ -1,0 +1,664 @@
+<!doctype html>
+<!--
+  GlassBox402 — pitch deck (ETHGlobal Lisbon 2026)
+  Self-contained: Inter Tight sits next to this file, no external URLs.
+  Functor design system, same tokens as lens/src/styles.css, so the slides
+  and the dashboard read as one product on video.
+
+  →/space next · ←/backspace prev · F fullscreen · S speaker notes · 1-5 jump
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GlassBox402 · Convert any API into an x402</title>
+<style>
+@font-face {
+  font-family: 'Inter Tight';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: block;
+  src: url('./InterTight-VariableFont_wght.ttf') format('truetype-variations');
+}
+
+:root {
+  --font-sans: 'Inter Tight', system-ui, -apple-system, sans-serif;
+  --font-mono: var(--font-sans);
+
+  --bg-primary:  oklch(0.985 0.006 85);
+  --bg-surface:  oklch(0.965 0.010 85);
+  --bg-elevated: oklch(0.945 0.012 85);
+  --bg-inset:    oklch(0.955 0.008 85);
+
+  --text-primary:   oklch(0.22 0.015 300);
+  --text-secondary: oklch(0.36 0.012 280);
+  --text-tertiary:  oklch(0.52 0.010 280);
+
+  --accent:         oklch(0.55 0.22 265);
+  --accent-subtle:  oklch(0.55 0.22 265 / 0.08);
+  --accent-surface: oklch(0.55 0.22 265 / 0.05);
+
+  --success:        oklch(0.65 0.18 155);
+  --success-ink:    oklch(0.45 0.15 155);
+  --success-subtle: oklch(0.65 0.18 155 / 0.10);
+
+  --error:          oklch(0.58 0.20 25);
+  --error-ink:      oklch(0.48 0.18 25);
+  --error-subtle:   oklch(0.58 0.20 25 / 0.10);
+
+  --border:        oklch(0.92 0.008 85);
+  --border-active: oklch(0.86 0.010 85);
+
+  --brand-lime:    oklch(0.89 0.22 130);
+  --brand-magenta: oklch(0.65 0.33 330);
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+
+  --shadow-sm: 0 1px 3px oklch(0 0 0 / 0.04);
+  --shadow-md: 0 1px 3px oklch(0 0 0 / 0.04), 0 8px 32px oklch(0 0 0 / 0.06);
+  --shadow-lg: 0 2px 8px oklch(0 0 0 / 0.06), 0 16px 48px oklch(0 0 0 / 0.10);
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  background: oklch(0.90 0.008 85);
+  font-family: var(--font-sans);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow: hidden;
+}
+
+/* ============================================================
+   STAGE — fixed 1600x900, scaled to the viewport so every
+   recording is pixel-identical regardless of screen size.
+   ============================================================ */
+#viewport { position: fixed; inset: 0; display: grid; place-items: center; }
+#stage {
+  width: 1600px; height: 900px;
+  position: relative;
+  background: var(--bg-primary);
+  overflow: hidden;
+  transform-origin: center center;
+  box-shadow: var(--shadow-lg);
+}
+
+.slide {
+  position: absolute; inset: 0;
+  padding: 88px 104px;
+  display: flex; flex-direction: column;
+  opacity: 0; visibility: hidden;
+  transition: opacity 340ms var(--ease-out), transform 340ms var(--ease-out);
+  transform: translateY(10px);
+}
+.slide.active { opacity: 1; visibility: visible; transform: none; }
+
+/* ============================================================
+   TYPE
+   ============================================================ */
+.eyebrow {
+  font-size: 15px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.16em; color: var(--text-tertiary);
+}
+h1 {
+  font-size: 66px; font-weight: 600; letter-spacing: -0.035em;
+  line-height: 1.06; color: var(--text-primary); text-wrap: balance;
+}
+h2 {
+  font-size: 46px; font-weight: 600; letter-spacing: -0.03em;
+  line-height: 1.12; text-wrap: balance;
+}
+.lede { font-size: 26px; color: var(--text-secondary); line-height: 1.45; max-width: 34ch; }
+/* calt off — Inter's contextual alternates render the x in 0x… as ×. */
+.mono { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum' 1, 'calt' 0; }
+
+/* ============================================================
+   BRAND MARK — lifted from lens/src/styles.css .gb-mark
+   ============================================================ */
+.gb-mark {
+  width: 64px; height: 64px; border-radius: 16px; flex-shrink: 0;
+  background: linear-gradient(140deg, var(--accent), oklch(0.62 0.20 245));
+  position: relative;
+  box-shadow: inset 0 0 0 1.5px oklch(1 0 0 / 0.18), var(--shadow-md);
+}
+.gb-mark::after {
+  content: ''; position: absolute; inset: 15px;
+  border: 3px solid oklch(1 0 0 / 0.85); border-radius: 6px;
+}
+.gb-mark::before {
+  content: ''; position: absolute; width: 12px; height: 12px; border-radius: 50%;
+  background: var(--brand-lime); z-index: 1;
+  top: 50%; left: 50%; transform: translate(-50%, -50%);
+  box-shadow: 0 0 14px oklch(0.89 0.22 130 / 0.9);
+}
+
+/* ============================================================
+   SLIDE 1 — TITLE
+   ============================================================ */
+.s-title { justify-content: center; }
+.brand-row { display: flex; align-items: center; gap: 22px; margin-bottom: 52px; }
+.wordmark { font-size: 40px; font-weight: 600; letter-spacing: -0.03em; }
+.wordmark b { color: var(--accent); font-weight: 600; }
+
+.title-headline {
+  font-size: 82px; font-weight: 600; letter-spacing: -0.04em;
+  line-height: 1.04; max-width: 20ch;
+}
+.title-headline .dim { color: var(--text-tertiary); }
+
+.title-foot {
+  position: absolute; left: 104px; right: 104px; bottom: 78px;
+  display: flex; align-items: center; gap: 14px;
+  padding-top: 26px; border-top: 1px solid var(--border);
+}
+.pill {
+  display: inline-flex; align-items: center; gap: 9px;
+  padding: 9px 16px; border-radius: 999px;
+  background: var(--bg-surface); border: 1px solid var(--border);
+  font-size: 17px; color: var(--text-secondary);
+}
+.pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); flex-shrink: 0; }
+.pill .dot.npm { background: var(--brand-magenta); }
+.pill b { color: var(--text-primary); font-weight: 500; }
+.title-foot .spacer { margin-left: auto; }
+.venue { font-size: 16px; color: var(--text-tertiary); }
+
+/* ============================================================
+   SLIDE 2 — PROBLEM
+   ============================================================ */
+.cols {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 76px;
+  flex: 1; align-items: center; margin-top: 44px;
+}
+.steps-intro { font-size: 27px; color: var(--text-secondary); margin-bottom: 26px; }
+.steps-intro b { color: var(--text-primary); font-weight: 600; }
+.steps { display: flex; flex-direction: column; gap: 20px; }
+.step {
+  display: flex; align-items: center; gap: 20px;
+  font-size: 36px; font-weight: 500; letter-spacing: -0.02em;
+  color: var(--text-primary);
+}
+.step-n {
+  width: 52px; height: 52px; border-radius: 13px; flex-shrink: 0;
+  display: grid; place-items: center;
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  font-size: 22px; font-weight: 600; color: var(--text-tertiary);
+  transition: all 260ms var(--ease-out);
+}
+.step.on .step-n { background: var(--accent); border-color: var(--accent); color: oklch(1 0 0); }
+.verdict {
+  margin-top: 42px; padding-top: 30px; border-top: 1px solid var(--border);
+  font-size: 40px; font-weight: 600; letter-spacing: -0.025em;
+  line-height: 1.15; color: var(--error-ink); max-width: 18ch;
+}
+
+/* ============================================================
+   BUILDS — data-frag elements reveal one arrow-press at a time.
+   Opacity only, so nothing reflows mid-recording.
+   ============================================================ */
+[data-frag] { opacity: 0; transition: opacity 300ms var(--ease-out), transform 300ms var(--ease-out); }
+[data-frag].on { opacity: 1; }
+.step[data-frag] { transform: translateY(6px); }
+.step[data-frag].on { transform: none; }
+.verdict[data-frag] { transform: translateY(8px); }
+.verdict[data-frag].on { transform: none; }
+
+/* the chain diagram */
+.chain { display: flex; flex-direction: column; gap: 26px; }
+.chain-row { display: flex; align-items: center; gap: 12px; }
+.node {
+  flex: 1; min-width: 0;
+  background: var(--bg-surface); border: 1px solid var(--border);
+  border-radius: var(--radius-md); padding: 18px 14px;
+  display: flex; flex-direction: column; align-items: center; gap: 9px;
+  box-shadow: var(--shadow-sm);
+}
+.node.human { background: var(--accent-surface); border-color: oklch(0.55 0.22 265 / 0.25); }
+.node .glyph { font-size: 30px; line-height: 1; }
+.node .name { font-size: 16px; font-weight: 500; color: var(--text-primary); text-align: center; }
+.node .sub { font-size: 13px; color: var(--text-tertiary); text-align: center; }
+.arrow { flex-shrink: 0; color: var(--text-tertiary); }
+
+.blocked {
+  position: relative;
+  border: 2px dashed oklch(0.58 0.20 25 / 0.45);
+  border-radius: var(--radius-md);
+  background: var(--error-subtle);
+  padding: 20px 22px;
+  display: flex; align-items: center; gap: 16px;
+}
+.blocked .lock {
+  width: 42px; height: 42px; border-radius: 10px; flex-shrink: 0;
+  display: grid; place-items: center;
+  background: oklch(0.58 0.20 25 / 0.14); color: var(--error-ink);
+}
+.blocked .txt { font-size: 18px; color: var(--error-ink); line-height: 1.4; }
+.blocked .txt b { font-weight: 600; }
+.chain-label {
+  font-size: 13px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.14em; color: var(--text-tertiary);
+}
+
+/* ============================================================
+   SLIDE 3 — SOLUTION
+   ============================================================ */
+/* npm mark, drawn rather than fetched so the file stays self-contained. */
+.npm-badge {
+  background: #CB3837; color: #fff; border-radius: 6px;
+  padding: 2px 11px 5px; font-size: 25px; font-weight: 700;
+  letter-spacing: -0.03em; line-height: 1.15;
+}
+.pkg { font-weight: 600; }
+
+/* chain brand row inside step 2 */
+.chainset { display: flex; align-items: center; gap: 24px; }
+.cbrand { display: flex; align-items: center; gap: 10px; font-size: 28px; font-weight: 500; }
+.cbrand svg { width: 34px; height: 34px; flex-shrink: 0; }
+
+/* the solution mirrors the problem: same shapes, green instead of red */
+.verdict.good { color: var(--success-ink); }
+.blocked.good { border-style: solid; border-color: oklch(0.65 0.18 155 / 0.4); background: var(--success-subtle); }
+.blocked.good .lock { background: oklch(0.65 0.18 155 / 0.16); color: var(--success-ink); }
+.blocked.good .txt { color: var(--success-ink); }
+
+.node.gb { background: var(--accent-surface); border-color: oklch(0.55 0.22 265 / 0.28); }
+.gb-mini {
+  width: 32px; height: 32px; border-radius: 9px; position: relative;
+  background: linear-gradient(140deg, var(--accent), oklch(0.62 0.20 245));
+  box-shadow: inset 0 0 0 1px oklch(1 0 0 / 0.2);
+}
+.gb-mini::after {
+  content: ''; position: absolute; inset: 8px;
+  border: 2px solid oklch(1 0 0 / 0.85); border-radius: 3px;
+}
+.gb-mini::before {
+  content: ''; position: absolute; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--brand-lime); top: 50%; left: 50%; transform: translate(-50%, -50%);
+}
+
+.strip {
+  display: flex; align-items: center; gap: 16px;
+  padding: 15px 20px; border-radius: var(--radius-md);
+  background: var(--bg-surface); border: 1px solid var(--border);
+}
+.strip .lbl {
+  font-size: 13px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.13em; color: var(--text-tertiary);
+}
+.strip .marks { display: flex; align-items: center; gap: 13px; margin-left: auto; }
+.strip .marks svg { width: 28px; height: 28px; }
+.strip .txt { font-size: 17px; color: var(--text-secondary); }
+
+/* ============================================================
+   SLIDE 4 — DEMO
+   ============================================================ */
+.s-demo {
+  background: oklch(0.17 0.012 285);
+  align-items: center; justify-content: center;
+}
+.s-demo .eyebrow { color: oklch(0.62 0.02 285); }
+.demo-word {
+  font-size: 150px; font-weight: 600; letter-spacing: 0.02em;
+  color: oklch(0.97 0.004 85); margin-top: 18px;
+}
+.demo-sub { font-size: 24px; color: oklch(0.68 0.02 285); margin-top: 16px; }
+
+/* Clickable launchers. The click-to-advance handler skips anchors. */
+.launch { display: flex; gap: 16px; margin-top: 46px; }
+.launch a {
+  display: inline-flex; align-items: center; gap: 12px;
+  padding: 15px 26px; border-radius: 999px; cursor: pointer;
+  background: oklch(0.24 0.014 285); border: 1px solid oklch(0.34 0.016 285);
+  color: oklch(0.95 0.004 85); font-size: 19px; text-decoration: none;
+  transition: all 160ms var(--ease-out);
+}
+.launch a:hover {
+  background: var(--accent); border-color: var(--accent);
+  color: oklch(1 0 0); transform: translateY(-2px);
+}
+.launch .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--brand-lime); flex-shrink: 0; }
+.launch .k { color: oklch(0.66 0.02 285); font-size: 15px; text-transform: uppercase; letter-spacing: 0.12em; font-weight: 600; }
+.launch a:hover .k { color: oklch(1 0 0 / 0.75); }
+
+/* ============================================================
+   SLIDE 5 — CLOSE
+   ============================================================ */
+.s-close { justify-content: center; }
+.s-close h1 { max-width: 21ch; }
+.close-sub { font-size: 30px; color: var(--text-secondary); margin-top: 26px; max-width: 32ch; line-height: 1.4; }
+.proof { display: flex; gap: 12px; margin-top: 54px; flex-wrap: wrap; }
+.proof .pill { font-size: 16px; }
+
+/* ============================================================
+   CHROME — counter + speaker notes
+   ============================================================ */
+#counter {
+  position: absolute; right: 34px; bottom: 26px;
+  font-size: 14px; color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums; letter-spacing: 0.06em;
+  z-index: 20;
+}
+.s-demo ~ #counter, #stage.dark #counter { color: oklch(0.55 0.02 285); }
+
+#notes {
+  position: fixed; left: 0; right: 0; bottom: 0;
+  background: oklch(0.15 0.01 285); color: oklch(0.92 0.006 85);
+  padding: 20px 28px; font-size: 15px; line-height: 1.55;
+  border-top: 2px solid var(--accent);
+  transform: translateY(101%); transition: transform 240ms var(--ease-out);
+  z-index: 100; max-height: 42vh; overflow-y: auto;
+}
+#notes.open { transform: none; }
+#notes .n-title {
+  font-size: 12px; text-transform: uppercase; letter-spacing: 0.14em;
+  color: oklch(0.70 0.02 285); margin-bottom: 9px;
+}
+#notes .vo { color: oklch(0.98 0.004 85); font-size: 17px; }
+#notes ol { margin: 10px 0 0 20px; display: flex; flex-direction: column; gap: 5px; }
+#notes .t { color: var(--brand-lime); font-variant-numeric: tabular-nums; }
+
+#hint {
+  position: fixed; left: 20px; bottom: 16px;
+  font-size: 12px; color: oklch(0.45 0.01 285);
+  letter-spacing: 0.04em; z-index: 20;
+  transition: opacity 400ms var(--ease-out);
+}
+</style>
+</head>
+<body>
+
+<div id="viewport">
+  <div id="stage">
+
+    <!-- ============ 1. TITLE ============ -->
+    <section class="slide s-title" data-notes='{"vo":"GlassBox402. Convert any API into an x402. Track it all in one place.","t":"6s"}'>
+      <div class="brand-row">
+        <div class="gb-mark"></div>
+        <div class="wordmark">Glass<b>Box</b>402</div>
+      </div>
+      <div class="title-headline">
+        Convert any API into an x402.<br>
+        <span class="dim">Track it all in one place.</span>
+      </div>
+      <div class="title-foot">
+        <span class="pill mono"><span class="dot npm"></span>npm&nbsp;<b>x402ify</b></span>
+        <span class="pill mono"><span class="dot"></span><b>glassbox402-production.up.railway.app</b></span>
+        <span class="spacer venue">ETHGlobal Lisbon 2026</span>
+      </div>
+    </section>
+
+    <!-- ============ 2. PROBLEM ============ -->
+    <section class="slide s-problem" data-notes='{"vo":"APIs were built for humans, not AI agents. If an AI wants to use Etherscan, a human has to create the key, configure it, and hand it to the agent. Machines cannot access this API directly.","t":"20s"}'>
+      <div class="eyebrow">Problem</div>
+      <h1 style="margin-top:18px; max-width:24ch;">APIs were built for humans,<br>not AI agents.</h1>
+
+      <div class="cols">
+        <div>
+          <div class="steps-intro">If an AI wants to use <b>Etherscan</b>:</div>
+          <div class="steps">
+            <div class="step" data-frag="1"><span class="step-n mono">1</span>A human has to create the key</div>
+            <div class="step" data-frag="2"><span class="step-n mono">2</span>Configure it</div>
+            <div class="step" data-frag="3"><span class="step-n mono">3</span>Hand it to the agent</div>
+          </div>
+          <div class="verdict" data-frag="4">Machines cannot access this API directly.</div>
+        </div>
+
+        <div class="chain">
+          <div class="chain-label">Every machine transaction, today</div>
+          <div class="chain-row">
+            <div class="node">
+              <div class="glyph">🤖</div>
+              <div class="name">Agent</div>
+              <div class="sub">has a wallet</div>
+            </div>
+            <svg class="arrow" data-frag="1" width="26" height="16" viewBox="0 0 26 16" fill="none"><path d="M0 8h22M16 2l6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <div class="node human" data-frag="1">
+              <div class="glyph">🧑‍💻</div>
+              <div class="name">Human</div>
+              <div class="sub">signs up, configures</div>
+            </div>
+            <svg class="arrow" data-frag="2" width="26" height="16" viewBox="0 0 26 16" fill="none"><path d="M0 8h22M16 2l6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <div class="node" data-frag="2">
+              <div class="glyph">🔑</div>
+              <div class="name">API key</div>
+              <div class="sub">handed over</div>
+            </div>
+            <svg class="arrow" data-frag="3" width="26" height="16" viewBox="0 0 26 16" fill="none"><path d="M0 8h22M16 2l6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <div class="node" data-frag="3">
+              <div class="glyph">🌐</div>
+              <div class="name">Etherscan</div>
+              <div class="sub">the API</div>
+            </div>
+          </div>
+
+          <div class="blocked" data-frag="4">
+            <div class="lock">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="4" y="10" width="16" height="11" rx="2.5" stroke="currentColor" stroke-width="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            </div>
+            <div class="txt"><b>Agent → API is blocked.</b> There is a human in the middle of every machine transaction.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 3. SOLUTION ============ -->
+    <section class="slide s-solution" data-notes='{"vo":"GlassBox402 converts APIs into an x402. One npm package, x402ify. It settles on Hedera, Base or Solana. And one dashboard to manage all of it. Machines can pay for it directly.","t":"20s"}'>
+      <div class="eyebrow">Solution</div>
+      <h1 style="margin-top:18px; max-width:24ch;">GlassBox402 converts APIs<br>into an x402.</h1>
+
+      <div class="cols">
+        <div>
+          <div class="steps-intro">To sell that same <b>Etherscan</b> call:</div>
+          <div class="steps">
+            <div class="step" data-frag="1">
+              <span class="step-n mono">1</span>
+              <span class="npm-badge">npm</span>
+              <span class="pkg mono">x402ify</span>
+            </div>
+            <div class="step" data-frag="2">
+              <span class="step-n mono">2</span>
+              <span class="chainset">
+                <span class="cbrand"><svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="16" fill="#000"/><rect x="9" y="7" width="3.2" height="18" fill="#fff"/><rect x="19.8" y="7" width="3.2" height="18" fill="#fff"/><rect x="9" y="12.4" width="14" height="2.7" fill="#fff"/><rect x="9" y="16.9" width="14" height="2.7" fill="#fff"/></svg>Hedera</span>
+                <span class="cbrand"><svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="16" fill="#0052FF"/></svg>Base</span>
+                <span class="cbrand"><svg viewBox="0 0 397.7 311.7" aria-hidden="true"><linearGradient id="sol" x1="360.9" y1="-37.5" x2="141.2" y2="383.3" gradientTransform="matrix(1 0 0 -1 0 314)" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#00FFA3"/><stop offset="1" stop-color="#DC1FFF"/></linearGradient><path fill="url(#sol)" d="M64.6 237.9c2.4-2.4 5.7-3.8 9.2-3.8h317.4c5.8 0 8.7 7 4.6 11.1l-62.7 62.7c-2.4 2.4-5.7 3.8-9.2 3.8H6.5c-5.8 0-8.7-7-4.6-11.1l62.7-62.7z"/><path fill="url(#sol)" d="M64.6 3.8C67.1 1.4 70.4 0 73.8 0h317.4c5.8 0 8.7 7 4.6 11.1l-62.7 62.7c-2.4 2.4-5.7 3.8-9.2 3.8H6.5c-5.8 0-8.7-7-4.6-11.1L64.6 3.8z"/><path fill="url(#sol)" d="M333.1 120.1c-2.4-2.4-5.7-3.8-9.2-3.8H6.5c-5.8 0-8.7 7-4.6 11.1l62.7 62.7c2.4 2.4 5.7 3.8 9.2 3.8h317.4c5.8 0 8.7-7 4.6-11.1l-62.7-62.7z"/></svg>Solana</span>
+              </span>
+            </div>
+            <div class="step" data-frag="3"><span class="step-n mono">3</span>One dashboard to manage x402</div>
+          </div>
+          <div class="verdict good" data-frag="4">Machines can pay for it directly.</div>
+        </div>
+
+        <div class="chain">
+          <div class="chain-label">Every machine transaction, with GlassBox402</div>
+          <div class="chain-row">
+            <div class="node">
+              <div class="glyph">🤖</div>
+              <div class="name">Agent</div>
+              <div class="sub">has a wallet</div>
+            </div>
+            <svg class="arrow" data-frag="1" width="26" height="16" viewBox="0 0 26 16" fill="none"><path d="M0 8h22M16 2l6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <div class="node gb" data-frag="1">
+              <div class="gb-mini"></div>
+              <div class="name">x402 paywall</div>
+              <div class="sub">pays per call</div>
+            </div>
+            <svg class="arrow" data-frag="1" width="26" height="16" viewBox="0 0 26 16" fill="none"><path d="M0 8h22M16 2l6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <div class="node" data-frag="1">
+              <div class="glyph">🌐</div>
+              <div class="name">Etherscan</div>
+              <div class="sub">the API</div>
+            </div>
+          </div>
+
+          <div class="strip" data-frag="2">
+            <span class="lbl">Settles on</span>
+            <span class="marks">
+              <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="16" fill="#000"/><rect x="9" y="7" width="3.2" height="18" fill="#fff"/><rect x="19.8" y="7" width="3.2" height="18" fill="#fff"/><rect x="9" y="12.4" width="14" height="2.7" fill="#fff"/><rect x="9" y="16.9" width="14" height="2.7" fill="#fff"/></svg>
+              <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="16" fill="#0052FF"/></svg>
+              <svg viewBox="0 0 397.7 311.7" aria-hidden="true"><linearGradient id="sol2" x1="360.9" y1="-37.5" x2="141.2" y2="383.3" gradientTransform="matrix(1 0 0 -1 0 314)" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#00FFA3"/><stop offset="1" stop-color="#DC1FFF"/></linearGradient><path fill="url(#sol2)" d="M64.6 237.9c2.4-2.4 5.7-3.8 9.2-3.8h317.4c5.8 0 8.7 7 4.6 11.1l-62.7 62.7c-2.4 2.4-5.7 3.8-9.2 3.8H6.5c-5.8 0-8.7-7-4.6-11.1l62.7-62.7z"/><path fill="url(#sol2)" d="M64.6 3.8C67.1 1.4 70.4 0 73.8 0h317.4c5.8 0 8.7 7 4.6 11.1l-62.7 62.7c-2.4 2.4-5.7 3.8-9.2 3.8H6.5c-5.8 0-8.7-7-4.6-11.1L64.6 3.8z"/><path fill="url(#sol2)" d="M333.1 120.1c-2.4-2.4-5.7-3.8-9.2-3.8H6.5c-5.8 0-8.7 7-4.6 11.1l62.7 62.7c2.4 2.4 5.7 3.8 9.2 3.8h317.4c5.8 0 8.7-7 4.6-11.1l-62.7-62.7z"/></svg>
+            </span>
+          </div>
+
+          <div class="strip" data-frag="3">
+            <span class="gb-mini"></span>
+            <span class="txt">Every payment, endpoint and payer, in one dashboard.</span>
+          </div>
+
+          <div class="blocked good" data-frag="4">
+            <div class="lock">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><rect x="4" y="10" width="16" height="11" rx="2.5" stroke="currentColor" stroke-width="2"/><path d="M8 10V7a4 4 0 0 1 8 0" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            </div>
+            <div class="txt"><b>No signup, no key, no human.</b> The agent discovers the API and pays for the call.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 4. DEMO ============ -->
+    <section class="slide s-demo" data-notes='{"vo":"Cut to the recording here. Full frame, no deck chrome.","t":"~2:00","shots":["Dashboard, APIs tab. Four real APIs earning. &quot;These are four real third-party APIs I have monetized.&quot;|15s","Terminal: npx x402ify … and the new API flashes into the dashboard live. &quot;That is the whole integration. My Etherscan key never leaves this machine.&quot;|25s","Buyer playground: buy as an agent. Real ETH price returns, HashScan link appears, HCS receipt lands a few seconds later.|30s","Features toggle: human vs bot on the same endpoint. $0.01 vs $0.10, both with real responses.|20s","Encore (optional): Claude + MCP. Ask for Uniswap TVL; it finds the subgraph, pays 0.02 HBAR, answers, and the payment appears on the dashboard mid-sentence.|20s"]}'>
+      <div class="eyebrow">Live</div>
+      <div class="demo-word">DEMO</div>
+      <div class="demo-sub">Four real APIs · real payments · settled on Hedera</div>
+      <div class="launch">
+        <a href="https://glassbox402-production.up.railway.app" target="_blank" rel="noreferrer">
+          <span class="dot"></span>glassbox402-production.up.railway.app
+        </a>
+      </div>
+    </section>
+
+    <!-- ============ 5. CLOSE ============ -->
+    <section class="slide s-close" data-notes='{"vo":"Any API becomes a machine-payable business in one command. The money settles on-chain. And for the first time, the seller can see it. x402ify is on npm; you can wrap your API before I leave the stage.","t":"10s"}'>
+      <div class="brand-row" style="margin-bottom:44px;">
+        <div class="gb-mark"></div>
+        <div class="wordmark">Glass<b>Box</b>402</div>
+      </div>
+      <h1>Any API becomes a machine-payable business in one command.</h1>
+      <div class="close-sub">The money settles on-chain. And for the first time, the seller can see it.</div>
+      <div class="proof">
+        <span class="pill mono"><span class="dot npm"></span>npm&nbsp;<b>x402ify</b></span>
+        <span class="pill mono"><span class="dot"></span><b>glassbox402-production.up.railway.app</b></span>
+        <span class="pill mono"><span class="dot"></span>HashScan&nbsp;<b>0x2403506e…92ed</b></span>
+      </div>
+    </section>
+
+    <div id="counter" class="mono">1 / 5</div>
+  </div>
+</div>
+
+<div id="notes"></div>
+<div id="hint">← → navigate · F fullscreen · S notes</div>
+
+<script>
+(function () {
+  var stage    = document.getElementById('stage');
+  var slides   = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+  var counter  = document.getElementById('counter');
+  var notesEl  = document.getElementById('notes');
+  var hint     = document.getElementById('hint');
+  var i = 0, f = 0, notesOpen = false;
+
+  /* Builds: how many arrow-presses a slide holds before moving on. */
+  function maxFrag(slide) {
+    var n = 0;
+    slide.querySelectorAll('[data-frag]').forEach(function (el) {
+      n = Math.max(n, parseInt(el.dataset.frag, 10) || 0);
+    });
+    return n;
+  }
+  function paintFrags() {
+    slides[i].querySelectorAll('[data-frag]').forEach(function (el) {
+      el.classList.toggle('on', (parseInt(el.dataset.frag, 10) || 0) <= f);
+    });
+  }
+
+  /* Scale the 1600x900 stage to fit whatever we're recording on. */
+  function fit() {
+    var pad = notesOpen ? 0.72 : 1;
+    var s = Math.min(window.innerWidth / 1600, (window.innerHeight * pad) / 900);
+    stage.style.transform = 'scale(' + s + ')';
+  }
+
+  function renderNotes() {
+    var raw = slides[i].dataset.notes;
+    if (!raw) { notesEl.innerHTML = ''; return; }
+    var n;
+    try { n = JSON.parse(raw); } catch (e) { return; }
+    var html = '<div class="n-title">Slide ' + (i + 1) + ' · ' + (n.t || '') + '</div>';
+    html += '<div class="vo">' + n.vo + '</div>';
+    if (n.shots) {
+      html += '<ol>';
+      n.shots.forEach(function (s) {
+        var p = s.split('|');
+        html += '<li>' + p[0] + ' <span class="t">' + (p[1] || '') + '</span></li>';
+      });
+      html += '</ol>';
+    }
+    notesEl.innerHTML = html;
+  }
+
+  function show(n, atEnd) {
+    i = Math.max(0, Math.min(slides.length - 1, n));
+    f = atEnd ? maxFrag(slides[i]) : 0;
+    slides.forEach(function (s, k) { s.classList.toggle('active', k === i); });
+    counter.textContent = (i + 1) + ' / ' + slides.length;
+    stage.classList.toggle('dark', slides[i].classList.contains('s-demo'));
+    paintFrags();
+    renderNotes();
+  }
+
+  /* Advance through this slide's builds first, then on to the next slide. */
+  function next() {
+    if (f < maxFrag(slides[i])) { f++; paintFrags(); }
+    else if (i < slides.length - 1) show(i + 1);
+  }
+  function prev() {
+    if (f > 0) { f--; paintFrags(); }
+    else if (i > 0) show(i - 1, true);
+  }
+
+  document.addEventListener('keydown', function (e) {
+    var k = e.key;
+    if (k === 'ArrowRight' || k === ' ' || k === 'PageDown' || k === 'ArrowDown') { e.preventDefault(); next(); }
+    else if (k === 'ArrowLeft' || k === 'Backspace' || k === 'PageUp' || k === 'ArrowUp') { e.preventDefault(); prev(); }
+    else if (k === 'Home') show(0);
+    else if (k === 'End') show(slides.length - 1, true);
+    else if (k === 'f' || k === 'F') {
+      if (document.fullscreenElement) document.exitFullscreen();
+      else document.documentElement.requestFullscreen();
+    }
+    else if (k === 's' || k === 'S') {
+      notesOpen = !notesOpen;
+      notesEl.classList.toggle('open', notesOpen);
+      fit();
+    }
+    else if (k >= '1' && k <= '9') show(parseInt(k, 10) - 1);
+  });
+
+  /* Click right half = next, left half = previous. Handy while recording.
+     Anchors open the app instead of advancing. */
+  document.addEventListener('click', function (e) {
+    if (e.target.closest('a')) return;
+    if (e.clientX > window.innerWidth / 2) next(); else prev();
+  });
+
+  window.addEventListener('resize', fit);
+  document.fonts.ready.then(fit);
+  fit();
+
+  /* #3 opens slide 3; #2.4 opens slide 2 with four builds already revealed. */
+  var h = (location.hash || '').replace('#', '').split('.');
+  var startSlide = parseInt(h[0], 10);
+  show(isNaN(startSlide) ? 0 : startSlide - 1);
+  if (h[1]) { f = Math.min(parseInt(h[1], 10) || 0, maxFrag(slides[i])); paintFrags(); }
+
+  setTimeout(function () { hint.style.opacity = '0'; }, 4000);
+})();
+</script>
+</body>
+</html>
